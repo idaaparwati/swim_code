@@ -320,10 +320,11 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
     unique: col(header,"Unique Key")
   };
 
-  const id = row[idx.id];
-  if (!id) return;
+  const currentKey = row[idx.unique]; // ambil Unique Key (C1)
+  if (!currentKey) return;
 
-  const nextKey = id.toString().trim() + "-C" + (currentRet + 1);
+  const baseId = currentKey.toString().split("-C")[0]; // ambil ID tanpa cycle
+  const nextKey = baseId + "-C" + (currentRet + 1);
 
   const targetData = nextSheet.getDataRange().getValues();
 
