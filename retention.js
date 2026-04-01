@@ -37,9 +37,13 @@ function onEdit(e) {
   const editedCol = e.range.getColumn();
   const value = e.range.getValue();
 
+  // 🔄 SYNC antar retention (edit biasa)
+  syncToNextRetention(sheetName, header, row, rowIndex, e.range.getColumn());
+
   // hanya trigger kalau edit di kolom status
   if (editedCol !== statusCol + 1) return;
 
+  
   if (!value || value.toString().trim().toLowerCase() !== "paid") return;
 
   // 🔥 VALIDASI WAJIB
@@ -301,4 +305,68 @@ function rebuildRetention() {
   }
 
   SpreadsheetApp.getUi().alert("✅ Rebuild Retention selesai!");
+}
+
+function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const currentRet = parseInt(sheetName.replace("Ret ", ""));
+  const nextSheet = ss.getSheetByName(`Ret ${currentRet + 1}`);
+  if (!nextSheet) return;
+
+  const idx = {
+    id: col(header,"Sparks ID"),
+    unique: col(header,"Unique Key")
+  };
+
+  const id = row[idx.id];
+  if (!id) return;
+
+  const nextKey = id.toString().trim() + "-C" + (currentRet + 1);
+
+  const targetData = nextSheet.getDataRange().getValues();
+
+  // 🎯 FIELD YANG BOLEH DI-SYNC
+  const syncFields = [
+    "SA Retention",
+    "Retention Status",
+    "Churn Reason",
+    "Response Notes",
+    "Join Date Retention",
+    "Retention Package",
+    "FP Date",
+    "FP Amount",
+    "Impacted Holiday",
+    "Other Impact"
+  ];
+
+  for (let i = 2; i < targetData.length; i++) {
+
+    let key = targetData[i][idx.unique];
+
+    if (key && key.toString().trim() === nextKey) {
+
+      for (let field of syncFields) {
+
+        const colIndex = col(header, field);
+
+        // hanya update kalau kolom yg diedit = field ini
+        if (editedCol === colIndex + 1) {
+
+          const sourceValue = row[colIndex];
+          const targetValue = targetData[i][colIndex];
+
+          // 🧠 RULE: jangan overwrite kalau target sudah ada isi
+          if (!targetValue) {
+            nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
+          }
+
+        }
+
+      }
+
+      break;
+    }
+  }
 }
