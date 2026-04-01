@@ -37,8 +37,7 @@ function onEdit(e) {
   const editedCol = e.range.getColumn();
   const value = e.range.getValue();
 
-  // 🔄 SYNC antar retention (edit biasa)
-  syncToNextRetention(sheetName, header, row, rowIndex, e.range.getColumn());
+  
 
   // hanya trigger kalau edit di kolom status
   if (editedCol !== statusCol + 1) return;
@@ -307,71 +306,78 @@ function rebuildRetention() {
   SpreadsheetApp.getUi().alert("✅ Rebuild Retention selesai!");
 }
 
-function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
+function syncAllRetentionFixed() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const MAX_RET = 5;
 
-  const currentRet = parseInt(sheetName.replace("Ret ", ""));
-  const nextSheet = ss.getSheetByName(`Ret ${currentRet + 1}`);
-  if (!nextSheet) return;
-
-  const idx = {
-    id: col(header,"Sparks ID"),
-    unique: col(header,"Unique Key")
+  // 🎯 MAPPING FIELD (INI KUNCI)
+  const fieldMapping = {
+    "Join Date Retention": "Previous Join Date",
+    "Actual Last Membership Date": "Previous Last Membership Date",
+    "Age Now": "Previous Age",
+    "Age Group Now": "Previous Age Group",
+    "Retention Package": "Previous Package",
+    "Total Session Retention Package": "Previous Total Session",
+    "FP Date": "Previous FP Date",
+    "SA Retention": "SA Aquisition"
   };
 
-const currentKey = row[idx.unique]; // ambil Unique Key (C1)
-if (!currentKey) return;
+  for (let current = 1; current < MAX_RET; current++) {
 
-const baseId = currentKey.toString().split("-C")[0]; // ambil ID tanpa cycle
-const nextKey = baseId + "-C" + (currentRet + 1);
+    let source = ss.getSheetByName(`Ret ${current}`);
+    let target = ss.getSheetByName(`Ret ${current + 1}`);
 
-  const targetData = nextSheet.getDataRange().getValues();
+    if (!source || !target) continue;
 
-  const syncFields = [
-    "SA Retention",
-    "Retention Status",
-    "Churn Reason",
-    "Response Notes",
-    "Join Date Retention",
-    "Retention Package",
-    "FP Date",
-    "FP Amount",
-    "Impacted Holiday",
-    "Other Impact"
-  ];
+    const data = source.getDataRange().getValues();
+    const header = data[1];
+    const targetData = target.getDataRange().getValues();
 
-  for (let i = 2; i < targetData.length; i++) {
+    const idx = {
+      unique: col(header,"Unique Key")
+    };
 
-    let key = targetData[i][idx.unique];
+    let targetMap = {};
 
-    if (key && key.toString().trim() === nextKey) {
+    for (let i = 2; i < targetData.length; i++) {
+      let key = targetData[i][idx.unique];
+      if (key) targetMap[key.toString().trim()] = i;
+    }
 
-      for (let field of syncFields) {
+    for (let i = 2; i < data.length; i++) {
 
-        const colIndex = col(header, field);
+      let row = data[i];
+      let currentKey = row[idx.unique];
+      if (!currentKey) continue;
 
-        if (editedCol === colIndex + 1) {
+      let baseId = currentKey.toString().split("-C")[0];
+      let nextKey = baseId + "-C" + (current + 1);
 
-          let sourceValue = row[colIndex];
+      if (targetMap[nextKey] !== undefined) {
 
-      // 🔥 override kalau kolom yang diedit
-      if (editedCol === colIndex + 1) {
-        sourceValue = SpreadsheetApp.getActiveSheet()
-          .getRange(rowIndex, editedCol)
-          .getValue();
-      } 
-          const targetValue = targetData[i][colIndex];
+        for (let sourceField in fieldMapping) {
+
+          const targetField = fieldMapping[sourceField];
+
+          const sourceCol = col(header, sourceField);
+          const targetCol = col(header, targetField);
+
+          const sourceValue = row[sourceCol];
+          const targetValue = targetData[targetMap[nextKey]][targetCol];
 
           if (sourceValue != targetValue) {
-            nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
+            target.getRange(targetMap[nextKey] + 1, targetCol + 1)
+                  .setValue(sourceValue);
           }
 
         }
 
       }
 
-      break;
     }
+
   }
+
+  SpreadsheetApp.getUi().alert("✅ Sync mapping selesai!");
 }
