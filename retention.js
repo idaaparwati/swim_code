@@ -119,7 +119,7 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
       unique: col(header,"Unique Key"),
 
       joinRet: col(header,"Join Date Retention"),
-      lastMember: col(header,"Last Membership Date"),
+      lastMember: col(header,"Actual Last Membership Date"),
       ageNow: col(header,"Age Now"),
       ageGroupNow: col(header,"Age Group Now"),
       packageRet: col(header,"Retention Package"),
@@ -327,7 +327,6 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
 
   const targetData = nextSheet.getDataRange().getValues();
 
-  // 🎯 FIELD YANG BOLEH DI-SYNC
   const syncFields = [
     "SA Retention",
     "Retention Status",
@@ -351,23 +350,14 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
 
         const colIndex = col(header, field);
 
-        // hanya update kalau kolom yg diedit = field ini
         if (editedCol === colIndex + 1) {
 
           const sourceValue = row[colIndex];
           const targetValue = targetData[i][colIndex];
 
-          // 🧠 RULE: jangan overwrite klo beda update
-          if (editedCol === colIndex + 1) {
-
-      const sourceValue = row[colIndex];
-      const targetValue = targetData[i][colIndex];
-
-      if (sourceValue != targetValue) {
-        nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
-      }
-
-    }
+          if (sourceValue != targetValue) {
+            nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
+          }
 
         }
 
