@@ -38,7 +38,8 @@ function onEdit(e) {
   const value = e.range.getValue();
 
   // 🔄 SYNC antar retention (edit biasa)
-  syncToNextRetention(e, sheetName, header, row, rowIndex, editedCol);
+  syncToNextRetention(sheetName, header, row, rowIndex, e.range.getColumn());
+
   // hanya trigger kalau edit di kolom status
   if (editedCol !== statusCol + 1) return;
 
@@ -319,11 +320,11 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
     unique: col(header,"Unique Key")
   };
 
-  const currentKey = row[idx.unique]; // ambil Unique Key (C1)
-  if (!currentKey) return;
+const currentKey = row[idx.unique]; // ambil Unique Key (C1)
+if (!currentKey) return;
 
-  const baseId = currentKey.toString().split("-C")[0]; // ambil ID tanpa cycle
-  const nextKey = baseId + "-C" + (currentRet + 1);
+const baseId = currentKey.toString().split("-C")[0]; // ambil ID tanpa cycle
+const nextKey = baseId + "-C" + (currentRet + 1);
 
   const targetData = nextSheet.getDataRange().getValues();
 
@@ -352,7 +353,14 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
 
         if (editedCol === colIndex + 1) {
 
-         const sourceValue = e.range.getValue(); // 🔥 FIX DI SINI
+          let sourceValue = row[colIndex];
+
+      // 🔥 override kalau kolom yang diedit
+      if (editedCol === colIndex + 1) {
+        sourceValue = SpreadsheetApp.getActiveSheet()
+          .getRange(rowIndex, editedCol)
+          .getValue();
+      } 
           const targetValue = targetData[i][colIndex];
 
           if (sourceValue != targetValue) {
