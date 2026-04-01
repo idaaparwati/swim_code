@@ -357,10 +357,17 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
           const sourceValue = row[colIndex];
           const targetValue = targetData[i][colIndex];
 
-          // 🧠 RULE: jangan overwrite kalau target sudah ada isi
-          if (!targetValue) {
-            nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
-          }
+          // 🧠 RULE: jangan overwrite klo beda update
+          if (editedCol === colIndex + 1) {
+
+      const sourceValue = row[colIndex];
+      const targetValue = targetData[i][colIndex];
+
+      if (sourceValue != targetValue) {
+        nextSheet.getRange(i + 1, colIndex + 1).setValue(sourceValue);
+      }
+
+    }
 
         }
 
