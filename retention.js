@@ -38,8 +38,7 @@ function onEdit(e) {
   const value = e.range.getValue();
 
   // 🔄 SYNC antar retention (edit biasa)
-  syncToNextRetention(sheetName, header, row, rowIndex, e.range.getColumn());
-
+  syncToNextRetention(e, sheetName, header, row, rowIndex, editedCol);
   // hanya trigger kalau edit di kolom status
   if (editedCol !== statusCol + 1) return;
 
@@ -353,7 +352,7 @@ function syncToNextRetention(sheetName, header, row, rowIndex, editedCol) {
 
         if (editedCol === colIndex + 1) {
 
-          const sourceValue = row[colIndex];
+         const sourceValue = e.range.getValue(); // 🔥 FIX DI SINI
           const targetValue = targetData[i][colIndex];
 
           if (sourceValue != targetValue) {
