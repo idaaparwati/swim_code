@@ -411,3 +411,47 @@ function resetAllSAColumns() {
 
   SpreadsheetApp.getUi().alert("🔥 Semua SA column sudah di-reset!");
 }
+
+function resetRetentionExceptRet1() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const MAX_RET = 5;
+
+  const columnsToClear = [
+    "SA Retention",
+    "Retention Status",
+    "Churn Reason",
+    "Response Notes",
+    "Join Date Retention",
+    "Retention Package",
+    "FP Date",
+    "FP Amount",
+    "DP Date",
+    "DP Amount",
+    "DP Invoice Number",
+    "FP Invoice Number",
+    "Total Actual Payment",
+    "Impacted Holiday",
+    "Other Impact"
+  ];
+
+  for (let i = 2; i <= MAX_RET; i++) { // 🔥 mulai dari Ret 2
+
+    let sheet = ss.getSheetByName(`Ret ${i}`);
+    if (!sheet) continue;
+
+    const data = sheet.getDataRange().getValues();
+    const header = data[1];
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow < 3) continue;
+
+    for (let colName of columnsToClear) {
+      let colIndex = col(header, colName);
+      sheet.getRange(3, colIndex + 1, lastRow - 2).clearContent();
+    }
+
+  }
+
+  SpreadsheetApp.getUi().alert("✅ Ret 2 ke atas sudah di-reset!");
+}
