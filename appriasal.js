@@ -314,3 +314,81 @@ function syncActiveStudentsOnly() {
   }
 
 }
+
+function addAndSyncSessionData() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const controlSheet = ss.getSheetByName("Control");
+  const selectedCenter = controlSheet.getRange("B1").getValue().toString().trim();
+
+  const sheet = ss.getSheetByName("Student Progressing - " + selectedCenter);
+  const master = ss.getSheetByName("Master Student List SWIM");
+
+  if (!sheet || !master) {
+    SpreadsheetApp.getUi().alert("Sheet not found");
+    return;
+  }
+
+  const header = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+
+  let totalCol, usedCol, leftCol;
+
+  // ✅ kalau belum ada → buat dulu (zero risk)
+  if (!header.includes("Total Sesi")) {
+
+    const lastCol = sheet.getLastColumn();
+    sheet.insertColumnsAfter(lastCol, 3);
+
+    sheet.getRange(1, lastCol + 1, 1, 3).setValues([[
+      "Total Sesi",
+      "Sesi Terpakai",
+      "Sesi Tersisa"
+    ]]);
+
+    totalCol = lastCol + 1;
+    usedCol = lastCol + 2;
+    leftCol = lastCol + 3;
+
+  } else {
+    totalCol = header.indexOf("Total Sesi") + 1;
+    usedCol = header.indexOf("Sesi Terpakai") + 1;
+    leftCol = header.indexOf("Sesi Tersisa") + 1;
+  }
+
+  // 🔑 ambil data master
+  const masterData = master.getDataRange().getValues();
+  const masterMap = {};
+
+  for (let i = 1; i < masterData.length; i++) {
+    const id = masterData[i][1];
+    const total = masterData[i][8]; // kolom Total Sesi (I)
+    const used = masterData[i][9];  // kolom Terpakai (J)
+    const left = masterData[i][10]; // kolom Tersisa (K)
+
+    if (id) {
+      masterMap[id] = {
+        total: total || 0,
+        used: used || 0,
+        left: left || 0
+      };
+    }
+  }
+
+  // 🔄 update ke progressing
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+
+    const studentID = data[i][1];
+
+    if (masterMap[studentID]) {
+
+      sheet.getRange(i + 1, totalCol).setValue(masterMap[studentID].total);
+      sheet.getRange(i + 1, usedCol).setValue(masterMap[studentID].used);
+      sheet.getRange(i + 1, leftCol).setValue(masterMap[studentID].left);
+
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("✅ Session data synced from Master (SAFE)");
+}
