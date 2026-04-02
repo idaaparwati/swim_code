@@ -381,3 +381,33 @@ function syncAllRetentionFixed() {
 
   SpreadsheetApp.getUi().alert("✅ Sync mapping selesai!");
 }
+
+function resetAllSAColumns() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ["Ret 1", "Ret 2", "Ret 3", "Ret 4"];
+
+  const startRow = 3;
+  const startCol = 20; // kolom T
+
+  sheets.forEach(name => {
+
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+
+    if (lastRow < startRow) return;
+
+    sheet.getRange(
+      startRow,
+      startCol,
+      lastRow - 2,
+      lastCol - startCol + 1
+    ).clearContent();
+
+  });
+
+  SpreadsheetApp.getUi().alert("🔥 Semua SA column sudah di-reset!");
+}
