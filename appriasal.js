@@ -204,12 +204,13 @@ function syncActiveStudentsOnly() {
 
   header.push("Primary Key");
 
+  // create header once
   if (outputSheet.getLastRow() === 0) {
     outputSheet.getRange(1,1,1,header.length).setValues([header]);
     outputSheet.getRange(1,1,1,header.length).setFontWeight("bold");
   }
 
-  // 🔑 existing PK
+  // existing PK
   const existingData = outputSheet.getDataRange().getValues();
   const existingPK = new Set();
 
@@ -237,18 +238,26 @@ function syncActiveStudentsOnly() {
     if (status !== "active") continue;
     if (!levelRaw || levelRaw === "0") continue;
 
-    // 🔧 normalize (biar gak mismatch lagi)
-    const ageGroup = ageGroupRaw?.toString().toLowerCase().replace(" f","").trim();
+    // normalize
+    const ageGroup = ageGroupRaw?.toString().toLowerCase().trim();
     const level = levelRaw?.toString().toLowerCase().trim();
+
+    let foundMatch = false;
 
     for (let j = 1; j < templates.length; j++) {
 
-      const tAge = templates[j][0]?.toString().toLowerCase().replace(" f","").trim();
+      const tAge = templates[j][0]?.toString().toLowerCase().trim();
       const tLevel = templates[j][1]?.toString().toLowerCase().trim();
       const metrics = templates[j][2];
       const skill = templates[j][3];
 
-      if (ageGroup === tAge && level === tLevel) {
+      // FLEXIBLE MATCH
+      if (
+        ageGroup.includes(tAge) &&
+        level.includes(tLevel)
+      ) {
+
+        foundMatch = true;
 
         const primaryKey = (
           studentID + "|" + metrics + "|" + skill
@@ -276,6 +285,11 @@ function syncActiveStudentsOnly() {
         result.push(row);
       }
     }
+
+    // DEBUG kalau tidak ada template match
+    if (!foundMatch) {
+      Logger.log("❌ NO TEMPLATE → " + name + " | " + ageGroup + " | " + level);
+    }
   }
 
   if (result.length > 0) {
@@ -293,8 +307,10 @@ function syncActiveStudentsOnly() {
       .build();
 
     scoreRange.setDataValidation(rule);
-  }
 
- 
+    SpreadsheetApp.getUi().alert("✅ New active students synced!");
+  } else {
+    SpreadsheetApp.getUi().alert("⚠️ No new students added. Check logs.");
+  }
 
 }
