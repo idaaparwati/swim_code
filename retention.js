@@ -103,10 +103,9 @@ function onEdit(e) {
     // =========================
     const allowedSheets = ["Ret 2", "Ret 3", "Ret 4"];
 
-    if (allowedSheets.includes(sheetName)) {
-      stackRetentionFinal_elegan_changedetection_V4();
-    }
-
+if (allowedSheets.includes(sheetName) && editedCol === statusCol + 1) {
+  stackRetentionFinal_elegan_changedetection_V4();
+}
   } catch (err) {
     Logger.log(err);
   }
