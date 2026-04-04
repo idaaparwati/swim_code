@@ -21,77 +21,95 @@ function col(header, name) {
  */
 function onEdit(e) {
 
-  const sheet = e.source.getActiveSheet();
-  const sheetName = sheet.getName();
+  try {
 
-  if (!sheetName.startsWith("Ret")) return;
+    const sheet = e.source.getActiveSheet();
+    const sheetName = sheet.getName();
 
-  const rowIndex = e.range.getRow();
-  if (rowIndex < 3) return;
+    const rowIndex = e.range.getRow();
+    if (rowIndex < 3) return;
 
-  const data = sheet.getDataRange().getValues();
-  const header = data[1];
-  const row = data[rowIndex - 1];
+    const data = sheet.getDataRange().getValues();
+    const header = data[1];
+    const row = data[rowIndex - 1];
 
-  const statusCol = col(header, "Retention Status");
-  const editedCol = e.range.getColumn();
-  const value = e.range.getValue();
+    const editedCol = e.range.getColumn();
+    const value = e.range.getValue();
 
-  
+    // =========================
+    // 🔥 RETENTION LOGIC (TETAP SAMA)
+    // =========================
+    if (sheetName.startsWith("Ret")) {
 
-  // hanya trigger kalau edit di kolom status
-  if (editedCol !== statusCol + 1) return;
+      const statusCol = col(header, "Retention Status");
 
-  
-  if (!value || value.toString().trim().toLowerCase() !== "paid") return;
+      // hanya trigger kalau edit di kolom status
+      if (editedCol === statusCol + 1) {
 
-  // 🔥 VALIDASI WAJIB
-  const requiredFields = [
-    "SA Retention",
-    "Retention Status",
-    "Churn Reason",
-    "Join Date Retention",
-    "Retention Package"
-  ];
+        if (!value || value.toString().trim().toLowerCase() !== "paid") return;
 
-  for (let field of requiredFields) {
-    let val = row[col(header, field)];
-    if (!val) {
-      SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
-      sheet.getRange(rowIndex, statusCol + 1).setValue(""); // reset status
-      return;
+        // 🔥 VALIDASI WAJIB
+        const requiredFields = [
+          "SA Retention",
+          "Retention Status",
+          "Churn Reason",
+          "Join Date Retention",
+          "Retention Package"
+        ];
+
+        for (let field of requiredFields) {
+          let val = row[col(header, field)];
+          if (!val) {
+            SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
+            sheet.getRange(rowIndex, statusCol + 1).setValue("");
+            return;
+          }
+        }
+
+        // 🔥 VALIDASI PAYMENT
+        const dpFields = [
+          "DP Date",
+          "DP Amount",
+          "DP Invoice Number"
+        ];
+
+        const fpFields = [
+          "FP Date",
+          "FP Amount",
+          "FP Invoice Number"
+        ];
+
+        const isDPFilled = dpFields.every(f => row[col(header, f)]);
+        const isFPFilled = fpFields.every(f => row[col(header, f)]);
+
+        if (!isDPFilled && !isFPFilled) {
+          SpreadsheetApp.getUi().alert(
+            "❌ Harus isi salah satu:\n\nDP (Date, Amount, Invoice)\nATAU\nFP (Date, Amount, Invoice)"
+          );
+          sheet.getRange(rowIndex, statusCol + 1).setValue("");
+          return;
+        }
+
+        // 🔥 PUSH
+        const currentRet = parseInt(sheetName.replace("Ret ", ""));
+        const nextRet = currentRet + 1;
+
+        pushSingleRow(sheetName, `Ret ${nextRet}`, nextRet, rowIndex);
+      }
     }
+
+    // =========================
+    // 🔥 MASTER STACK (DITAMBAHIN)
+    // =========================
+    const allowedSheets = ["Ret 2", "Ret 3", "Ret 4"];
+
+    if (allowedSheets.includes(sheetName)) {
+      stackRetentionFinal_elegan_changedetection_V4();
+    }
+
+  } catch (err) {
+    Logger.log(err);
   }
-
-  // 🔥 VALIDASI PAYMENT (DP ATAU FP)
-  const dpFields = [
-    "DP Date",
-    "DP Amount",
-    "DP Invoice Number"
-  ];
-
-  const fpFields = [
-    "FP Date",
-    "FP Amount",
-    "FP Invoice Number"
-  ];
-
-  const isDPFilled = dpFields.every(f => row[col(header, f)]);
-  const isFPFilled = fpFields.every(f => row[col(header, f)]);
-
-  if (!isDPFilled && !isFPFilled) {
-    SpreadsheetApp.getUi().alert(
-      "❌ Harus isi salah satu:\n\nDP (Date, Amount, Invoice)\nATAU\nFP (Date, Amount, Invoice)"
-    );
-    sheet.getRange(rowIndex, statusCol + 1).setValue(""); // reset status
-    return;
-  }
-
-  // 🔥 LULUS VALIDASI → PUSH
-  const currentRet = parseInt(sheetName.replace("Ret ", ""));
-  const nextRet = currentRet + 1;
-
-  pushSingleRow(sheetName, `Ret ${nextRet}`, nextRet, rowIndex);
 }
 
 
@@ -454,4 +472,117 @@ function resetRetentionExceptRet1() {
   }
 
   SpreadsheetApp.getUi().alert("✅ Ret 2 ke atas sudah di-reset!");
+}
+
+
+
+function stackRetentionFinal_elegan_changedetection_V4() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const target = ss.getSheetByName("Master Stack");
+
+  const sheets = ["Ret 1", "Ret 2", "Ret 3", "Ret 4"];
+  const START_ROW = 3;
+
+  const ID_COL = 2;
+  const STATUS_COL = 21;
+
+  const now = new Date();
+
+  const lastRow = target.getLastRow();
+  const lastCol = target.getLastColumn();
+
+  let existingData = [];
+  let idMap = {};
+
+  if (lastRow >= START_ROW) {
+    existingData = target
+      .getRange(START_ROW, 1, lastRow - 2, lastCol)
+      .getValues();
+
+    existingData.forEach((row, i) => {
+      const key = row[ID_COL - 1];
+      if (key) {
+        idMap[key] = {
+          rowIndex: i + START_ROW,
+          rowData: row,
+          firstSeen: row[lastCol - 3]
+        };
+      }
+    });
+  }
+
+  let appendData = [];
+
+  sheets.forEach(sheetName => {
+    const sh = ss.getSheetByName(sheetName);
+    if (!sh) return;
+
+    const lastRow = sh.getLastRow();
+    if (lastRow < START_ROW) return;
+
+    const data = sh
+      .getRange(START_ROW, 1, lastRow - 2, sh.getLastColumn())
+      .getValues();
+
+    data.forEach(row => {
+      const key = row[ID_COL - 1];
+      if (!key) return;
+
+      const status = row[STATUS_COL - 1];
+      const isRet1 = sheetName === "Ret 1";
+
+      if (!isRet1 && String(status).trim().toLowerCase() !== "paid") return;
+
+      const center = String(key).substring(0, 3);
+
+      if (idMap[key]) {
+        const existing = idMap[key];
+
+        const existingCore = existing.rowData.slice(0, row.length);
+
+        let isChanged = false;
+
+        for (let i = 0; i < row.length; i++) {
+          if (existingCore[i] !== row[i]) {
+            isChanged = true;
+            break;
+          }
+        }
+
+        if (isChanged) {
+          const newRow = [
+            ...row,
+            center,
+            existing.firstSeen || now,
+            now,
+            sheetName,
+            sheetName
+          ];
+
+          target
+            .getRange(existing.rowIndex, 1, 1, newRow.length)
+            .setValues([newRow]);
+        }
+
+      } else {
+        const newRow = [
+          ...row,
+          center,
+          now,
+          now,
+          sheetName,
+          sheetName
+        ];
+
+        appendData.push(newRow);
+      }
+    });
+  });
+
+  if (appendData.length > 0) {
+    const start = target.getLastRow() + 1;
+    target
+      .getRange(start, 1, appendData.length, appendData[0].length)
+      .setValues(appendData);
+  }
 }
