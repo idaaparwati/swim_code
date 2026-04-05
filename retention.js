@@ -23,28 +23,32 @@ function onEdit(e) {
 
   try {
 
+    if (!e) return;
+
     const sheet = e.source.getActiveSheet();
     const sheetName = sheet.getName();
 
     const rowIndex = e.range.getRow();
     if (rowIndex < 3) return;
 
-    const data = sheet.getDataRange().getValues();
-    const header = data[1];
-    const row = data[rowIndex - 1];
-
+    const header = sheet.getRange(2,1,1,sheet.getLastColumn()).getValues()[0];
     const editedCol = e.range.getColumn();
     const value = e.range.getValue();
 
+    const statusCol = col(header, "Retention Status");
+
     // =========================
-    // 🔥 RETENTION LOGIC (TETAP SAMA)
+    // 🔥 RETENTION CORE SYSTEM
     // =========================
     if (sheetName.startsWith("Ret")) {
 
-      const statusCol = col(header, "Retention Status");
-
-      // hanya trigger kalau edit di kolom status
+      // hanya trigger saat edit status
       if (editedCol === statusCol + 1) {
+
+        SpreadsheetApp.flush();
+        Utilities.sleep(50);
+
+        const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
 
         if (!value || value.toString().trim().toLowerCase() !== "paid") return;
 
@@ -58,8 +62,7 @@ function onEdit(e) {
         ];
 
         for (let field of requiredFields) {
-          let val = row[col(header, field)];
-          if (!val) {
+          if (!row[col(header, field)]) {
             SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
             sheet.getRange(rowIndex, statusCol + 1).setValue("");
             return;
@@ -67,30 +70,19 @@ function onEdit(e) {
         }
 
         // 🔥 VALIDASI PAYMENT
-        const dpFields = [
-          "DP Date",
-          "DP Amount",
-          "DP Invoice Number"
-        ];
-
-        const fpFields = [
-          "FP Date",
-          "FP Amount",
-          "FP Invoice Number"
-        ];
+        const dpFields = ["DP Date","DP Amount","DP Invoice Number"];
+        const fpFields = ["FP Date","FP Amount","FP Invoice Number"];
 
         const isDPFilled = dpFields.every(f => row[col(header, f)]);
         const isFPFilled = fpFields.every(f => row[col(header, f)]);
 
         if (!isDPFilled && !isFPFilled) {
-          SpreadsheetApp.getUi().alert(
-            "❌ Harus isi salah satu:\n\nDP (Date, Amount, Invoice)\nATAU\nFP (Date, Amount, Invoice)"
-          );
+          SpreadsheetApp.getUi().alert("❌ Isi DP atau FP dulu");
           sheet.getRange(rowIndex, statusCol + 1).setValue("");
           return;
         }
 
-        // 🔥 PUSH
+        // 🔥 PUSH NEXT RETENTION
         const currentRet = parseInt(sheetName.replace("Ret ", ""));
         const nextRet = currentRet + 1;
 
@@ -99,18 +91,18 @@ function onEdit(e) {
     }
 
     // =========================
-    // 🔥 MASTER STACK (DITAMBAHIN)
+    // 🔥 MASTER STACK (LIGHT TRIGGER)
     // =========================
     const allowedSheets = ["Ret 2", "Ret 3", "Ret 4"];
 
-if (allowedSheets.includes(sheetName) && editedCol === statusCol + 1) {
-  stackRetentionFinal_elegan_changedetection_V4();
-}
+    if (allowedSheets.includes(sheetName) && editedCol === statusCol + 1) {
+      stackRetentionFinal_elegan_changedetection_V4();
+    }
+
   } catch (err) {
     Logger.log(err);
   }
 }
-
 
 /**
  * 🔥 PUSH 1 ROW (ANTI DUPLICATE + NO OVERWRITE SOURCE)
@@ -217,6 +209,8 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
     newRow[col(header,"Age Group Now")] = "";
 
     target.appendRow(newRow);
+    // Master Stack
+    stackRetentionFinal_elegan_changedetection_V4();
 
   } finally {
     lock.releaseLock();
@@ -476,6 +470,7 @@ function resetRetentionExceptRet1() {
 
 
 function stackRetentionFinal_elegan_changedetection_V4() {
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const target = ss.getSheetByName("Master Stack");
 
@@ -483,7 +478,6 @@ function stackRetentionFinal_elegan_changedetection_V4() {
   const START_ROW = 3;
 
   const ID_COL = 2;
-  const STATUS_COL = 21;
 
   const now = new Date();
 
@@ -493,7 +487,11 @@ function stackRetentionFinal_elegan_changedetection_V4() {
   let existingData = [];
   let idMap = {};
 
+  // =========================
+  // 🔥 LOAD DATA MASTER STACK
+  // =========================
   if (lastRow >= START_ROW) {
+
     existingData = target
       .getRange(START_ROW, 1, lastRow - 2, lastCol)
       .getValues();
@@ -512,31 +510,44 @@ function stackRetentionFinal_elegan_changedetection_V4() {
 
   let appendData = [];
 
+  // =========================
+  // 🔥 LOOP SEMUA RET SHEET
+  // =========================
   sheets.forEach(sheetName => {
+
     const sh = ss.getSheetByName(sheetName);
     if (!sh) return;
 
     const lastRow = sh.getLastRow();
     if (lastRow < START_ROW) return;
 
+    // 🔥 HEADER DINAMIS (FIX BUG)
+    const header = sh.getRange(2,1,1,sh.getLastColumn()).getValues()[0];
+    const STATUS_COL = col(header, "Retention Status");
+
     const data = sh
       .getRange(START_ROW, 1, lastRow - 2, sh.getLastColumn())
       .getValues();
 
     data.forEach(row => {
+
       const key = row[ID_COL - 1];
       if (!key) return;
 
-      const status = row[STATUS_COL - 1];
+      const status = row[STATUS_COL];
       const isRet1 = sheetName === "Ret 1";
 
+      // 🔥 FILTER LOGIC
       if (!isRet1 && String(status).trim().toLowerCase() !== "paid") return;
 
       const center = String(key).substring(0, 3);
 
+      // =========================
+      // 🔄 UPDATE EXISTING
+      // =========================
       if (idMap[key]) {
-        const existing = idMap[key];
 
+        const existing = idMap[key];
         const existingCore = existing.rowData.slice(0, row.length);
 
         let isChanged = false;
@@ -549,6 +560,7 @@ function stackRetentionFinal_elegan_changedetection_V4() {
         }
 
         if (isChanged) {
+
           const newRow = [
             ...row,
             center,
@@ -563,7 +575,13 @@ function stackRetentionFinal_elegan_changedetection_V4() {
             .setValues([newRow]);
         }
 
-      } else {
+      } 
+      
+      // =========================
+      // ➕ INSERT BARU
+      // =========================
+      else {
+
         const newRow = [
           ...row,
           center,
@@ -575,13 +593,32 @@ function stackRetentionFinal_elegan_changedetection_V4() {
 
         appendData.push(newRow);
       }
+
     });
+
   });
 
+  // =========================
+  // ➕ APPEND KE MASTER
+  // =========================
   if (appendData.length > 0) {
+
     const start = target.getLastRow() + 1;
+
     target
       .getRange(start, 1, appendData.length, appendData[0].length)
       .setValues(appendData);
   }
+
+}
+function resetMasterStack() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Master Stack");
+
+  if (sheet.getLastRow() > 2) {
+    sheet.getRange(3,1,sheet.getLastRow()-2,sheet.getLastColumn()).clearContent();
+  }
+
+  SpreadsheetApp.getUi().alert("✅ Master Stack cleared!");
 }
