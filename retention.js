@@ -117,10 +117,17 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const source = ss.getSheetByName(sourceName);
 
-    const data = source.getDataRange().getValues();
-    const header = data[1];
-    const row = data[rowIndex - 1];
+    // 🔥 ambil header langsung (bukan dari data)
+    const header = source.getRange(2,1,1,source.getLastColumn()).getValues()[0];
 
+    // 🔥 pastikan data terbaru kebaca
+    SpreadsheetApp.flush();
+    Utilities.sleep(50);
+
+    // 🔥 ambil row terbaru
+    const row = source.getRange(rowIndex, 1, 1, source.getLastColumn()).getValues()[0];
+
+    
     const idx = {
       id: col(header,"Sparks ID"),
       cycle: col(header,"Cycle"),
