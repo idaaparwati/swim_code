@@ -417,3 +417,48 @@ function dailyAutomation() {
   syncAllCenters();
   addAndSyncSessionData();
 }
+
+
+function regeneratePrimaryKeyOnly() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet(); // atau spesifik: getSheetByName("Student Progressing - KLM")
+
+  const data = sheet.getDataRange().getValues();
+
+  const headers = data[0];
+
+  const colName = headers.indexOf("Student Name");
+  const colAge = headers.indexOf("Age Group");
+  const colLevel = headers.indexOf("Level");
+  const colMetrics = headers.indexOf("Metrics");
+  const colSkill = headers.indexOf("Skill");
+  const colPK = headers.indexOf("Primary Key");
+
+  if (colPK === -1) {
+    Logger.log("Primary Key column not found");
+    return;
+  }
+
+  for (let i = 1; i < data.length; i++) {
+
+    const name = data[i][colName];
+    const ageGroup = data[i][colAge];
+    const level = data[i][colLevel];
+    const metrics = data[i][colMetrics];
+    const skill = data[i][colSkill];
+
+    const primaryKey = (
+      name +
+      ageGroup +
+      level +
+      metrics +
+      skill
+    ).toLowerCase().trim();
+
+    sheet.getRange(i + 1, colPK + 1).setValue(primaryKey);
+  }
+
+  Logger.log("✅ Primary Key regenerated (no separator)");
+
+}
