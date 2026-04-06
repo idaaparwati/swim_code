@@ -339,17 +339,20 @@ function syncActiveStudentsByCenter(selectedCenter) {
       const skill = templates[j][3];
 
       // FLEXIBLE MATCH
-      if (
-        ageGroup.includes(tAge) &&
-        level.includes(tLevel)
-      ) {
+    if (
+      ageGroup === tAge &&
+      level === tLevel
+    )
+       {
 
         foundMatch = true;
-
-        const primaryKey = (
-          studentID + "|" + metrics + "|" + skill
-        ).toLowerCase().trim();
-
+    const primaryKey = (
+        name +
+        ageGroupRaw +
+        levelRaw +
+        metrics +
+        skill
+      ).toLowerCase().trim();
         if (existingPK.has(primaryKey)) continue;
 
         const row = [
