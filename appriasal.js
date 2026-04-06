@@ -191,34 +191,46 @@ function addAndSyncSessionData() {
   const master = ss.getSheetByName("Master Student List SWIM");
 
   if (!sheet || !master) {
-     Logger.log("Sheet not found");
-return;
+    Logger.log("Sheet not found");
+    return;
   }
 
   const header = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
 
-  let totalCol, usedCol, leftCol;
+  let totalCol, usedCol, leftCol, validCol;
 
-  // ✅ kalau belum ada → buat dulu (zero risk)
+  // ✅ kalau belum ada Total Sesi → buat semua
   if (!header.includes("Total Sesi")) {
 
     const lastCol = sheet.getLastColumn();
-    sheet.insertColumnsAfter(lastCol, 3);
+    sheet.insertColumnsAfter(lastCol, 4);
 
-    sheet.getRange(1, lastCol + 1, 1, 3).setValues([[
+    sheet.getRange(1, lastCol + 1, 1, 4).setValues([[
       "Total Sesi",
       "Sesi Terpakai",
-      "Sesi Tersisa"
+      "Sesi Tersisa",
+      "Valid Session"
     ]]);
 
     totalCol = lastCol + 1;
     usedCol = lastCol + 2;
     leftCol = lastCol + 3;
+    validCol = lastCol + 4;
 
   } else {
+
     totalCol = header.indexOf("Total Sesi") + 1;
     usedCol = header.indexOf("Sesi Terpakai") + 1;
     leftCol = header.indexOf("Sesi Tersisa") + 1;
+
+    // ✅ kalau Valid Session belum ada → insert setelah Sesi Tersisa
+    if (!header.includes("Valid Session")) {
+      sheet.insertColumnAfter(leftCol);
+      sheet.getRange(1, leftCol + 1).setValue("Valid Session");
+      validCol = leftCol + 1;
+    } else {
+      validCol = header.indexOf("Valid Session") + 1;
+    }
   }
 
   // 🔑 ambil data master
@@ -226,19 +238,22 @@ return;
   const masterMap = {};
 
   for (let i = 1; i < masterData.length; i++) {
-    const id = masterData[i][1];
-    const total = masterData[i][8]; // kolom Total Sesi (I)
-    const used = masterData[i][9];  // kolom Terpakai (J)
-    const left = masterData[i][10]; // kolom Tersisa (K)
 
-    if (id) {
-      masterMap[id] = {
-        total: total || 0,
-        used: used || 0,
-        left: left || 0
-      };
-    }
+  const id = masterData[i][1];     // ✅ INI YANG KURANG
+  const total = masterData[i][8];  // I
+  const used = masterData[i][9];   // J
+  const left = masterData[i][10];  // K
+  const valid = masterData[i][11]; // L
+
+  if (id) {
+    masterMap[id] = {
+      total: total || 0,
+      used: used || 0,
+      left: left || 0,
+      valid: valid || 0
+    };
   }
+}
 
   // 🔄 update ke progressing
   const data = sheet.getDataRange().getValues();
@@ -252,13 +267,13 @@ return;
       sheet.getRange(i + 1, totalCol).setValue(masterMap[studentID].total);
       sheet.getRange(i + 1, usedCol).setValue(masterMap[studentID].used);
       sheet.getRange(i + 1, leftCol).setValue(masterMap[studentID].left);
+      sheet.getRange(i + 1, validCol).setValue(masterMap[studentID].valid);
 
     }
   }
 
-  Logger.log("Session data synced");
+  Logger.log("✅ Session + Valid Session synced");
 }
-
 
 function syncActiveStudentsByCenter(selectedCenter) {
 
