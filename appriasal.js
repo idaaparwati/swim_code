@@ -316,12 +316,14 @@ function syncActiveStudentsByCenter(selectedCenter) {
   const existingData = outputSheet.getDataRange().getValues();
   const existingPK = new Set();
 
-  if (existingData.length > 1) {
-    for (let i = 1; i < existingData.length; i++) {
-      const pk = existingData[i][existingData[i].length - 1];
-      if (pk) existingPK.add(pk);
-    }
+// isi dari sheet
+if (existingData.length > 1) {
+  for (let i = 1; i < existingData.length; i++) {
+    const pk = existingData[i][existingData[i].length - 1];
+    if (pk) existingPK.add(pk.toString().toLowerCase().trim());
   }
+}
+  
 
   const result = [];
 
@@ -361,14 +363,16 @@ function syncActiveStudentsByCenter(selectedCenter) {
        {
 
         foundMatch = true;
-      const primaryKey = (
-        name +
-        ageGroupRaw +
-        levelRaw +
-        coach +       // ✅ WAJIB TAMBAH
-        metrics +
+    const primaryKey = [
+        name,
+        ageGroupRaw,
+        levelRaw,
+        coach,
+        metrics,
         skill
-      ).toLowerCase().trim();
+      ]
+  .map(v => v.toString().toLowerCase().trim())
+  .join("|");
         if (existingPK.has(primaryKey)) continue;
         existingPK.add(primaryKey); // ✅ WAJIB TAMBAH INI
 
@@ -442,7 +446,7 @@ function dailyAutomation() {
 function regeneratePrimaryKeyOnly() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getActiveSheet(); // atau spesifik sheet
+  const sheet = ss.getActiveSheet();
 
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -450,42 +454,42 @@ function regeneratePrimaryKeyOnly() {
   const colName = headers.indexOf("Student Name");
   const colAge = headers.indexOf("Age Group");
   const colLevel = headers.indexOf("Level");
-  const colCoach = headers.indexOf("Coach"); // ✅ NEW
+  const colCoach = headers.indexOf("Coach");
   const colMetrics = headers.indexOf("Metrics");
   const colSkill = headers.indexOf("Skill");
   const colPK = headers.indexOf("Primary Key");
 
   if (colPK === -1) {
-    Logger.log("Primary Key column not found");
+    Logger.log("❌ Primary Key column not found");
     return;
   }
 
-  // ⚡ pakai array (biar cepat, bukan setValue per row)
   const pkValues = [];
 
   for (let i = 1; i < data.length; i++) {
 
-    const name = data[i][colName];
-    const ageGroup = data[i][colAge];
-    const level = data[i][colLevel];
-    const coach = data[i][colCoach]; // ✅ NEW
-    const metrics = data[i][colMetrics];
-    const skill = data[i][colSkill];
+    const name = data[i][colName] || "";
+    const ageGroup = data[i][colAge] || "";
+    const level = data[i][colLevel] || "";
+    const coach = data[i][colCoach] || "";
+    const metrics = data[i][colMetrics] || "";
+    const skill = data[i][colSkill] || "";
 
-    const primaryKey = (
-      name +
-      ageGroup +
-      level +
-      coach +        // ✅ IMPORTANT
-      metrics +
+    const primaryKey = [
+      name,
+      ageGroup,
+      level,
+      coach,
+      metrics,
       skill
-    ).toLowerCase().trim();
+    ]
+      .map(v => v.toString().toLowerCase().trim())
+      .join("|");
 
     pkValues.push([primaryKey]);
   }
 
-  // ⚡ sekali tulis (super cepat)
   sheet.getRange(2, colPK + 1, pkValues.length, 1).setValues(pkValues);
 
-  Logger.log("✅ Primary Key regenerated (with coach)");
+  Logger.log("✅ Primary Key regenerated with separator");
 }
