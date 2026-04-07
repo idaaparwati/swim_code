@@ -370,6 +370,7 @@ function syncActiveStudentsByCenter(selectedCenter) {
         skill
       ).toLowerCase().trim();
         if (existingPK.has(primaryKey)) continue;
+        existingPK.add(primaryKey); // ✅ WAJIB TAMBAH INI
 
         const row = [
           center,
