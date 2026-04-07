@@ -20,89 +20,84 @@ function col(header, name) {
  * 🔥 REALTIME (HANYA SAAT PAID)
  */
 function onEdit(e) {
+  Logger.log("EDIT DETECTED");
 
-  try {
+  const sheet = e.source.getActiveSheet();
+  const sheetName = sheet.getName();
 
-    if (!e) return;
+  if (!sheetName.startsWith("Ret")) return;
 
-    const sheet = e.source.getActiveSheet();
-    const sheetName = sheet.getName();
+  const rowIndex = e.range.getRow();
+  if (rowIndex < 3) return;
 
-    const rowIndex = e.range.getRow();
-    if (rowIndex < 3) return;
+  const header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-    const header = sheet.getRange(2,1,1,sheet.getLastColumn()).getValues()[0];
-    const editedCol = e.range.getColumn();
-    const value = e.range.getValue();
+  const statusCol = col(header, "Retention Status");
+  const editedCol = e.range.getColumn();
+  const value = e.range.getValue();
 
-    const statusCol = col(header, "Retention Status");
+  Logger.log("Value: " + value);
+  Logger.log("Column: " + editedCol);
 
-    // =========================
-    // 🔥 RETENTION CORE SYSTEM
-    // =========================
-    if (sheetName.startsWith("Ret")) {
+  // ✅ filter dulu (INI PENTING BANGET)
+  if (editedCol !== statusCol + 1) return;
+  if (!value || value.toString().trim().toLowerCase() !== "paid") return;
 
-      // hanya trigger saat edit status
-      if (editedCol === statusCol + 1) {
+  // ✅ delay SEKALI aja (biar semua input settle)
+  Utilities.sleep(800);
 
-        SpreadsheetApp.flush();
-        Utilities.sleep(50);
+  // ✅ ambil row SETELAH delay
+  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
 
-        const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // 🔥 VALIDASI WAJIB
+  const requiredFields = [
+    "SA Retention",
+    "Retention Status",
+    "Churn Reason",
+    "Join Date Retention",
+    "Retention Package"
+  ];
 
-        if (!value || value.toString().trim().toLowerCase() !== "paid") return;
-
-        // 🔥 VALIDASI WAJIB
-        const requiredFields = [
-          "SA Retention",
-          "Retention Status",
-          "Churn Reason",
-          "Join Date Retention",
-          "Retention Package"
-        ];
-
-        for (let field of requiredFields) {
-          if (!row[col(header, field)]) {
-            SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
-            sheet.getRange(rowIndex, statusCol + 1).setValue("");
-            return;
-          }
-        }
-
-        // 🔥 VALIDASI PAYMENT
-        const dpFields = ["DP Date","DP Amount","DP Invoice Number"];
-        const fpFields = ["FP Date","FP Amount","FP Invoice Number"];
-
-        const isDPFilled = dpFields.every(f => row[col(header, f)]);
-        const isFPFilled = fpFields.every(f => row[col(header, f)]);
-
-        if (!isDPFilled && !isFPFilled) {
-          SpreadsheetApp.getUi().alert("❌ Isi DP atau FP dulu");
-          sheet.getRange(rowIndex, statusCol + 1).setValue("");
-          return;
-        }
-
-        // 🔥 PUSH NEXT RETENTION
-        const currentRet = parseInt(sheetName.replace("Ret ", ""));
-        const nextRet = currentRet + 1;
-
-        pushSingleRow(sheetName, `Ret ${nextRet}`, nextRet, rowIndex);
-      }
+  for (let field of requiredFields) {
+    let val = row[col(header, field)];
+    if (!val) {
+      SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
+      sheet.getRange(rowIndex, statusCol + 1).setValue("");
+      return;
     }
-
-    // =========================
-    // 🔥 MASTER STACK (LIGHT TRIGGER)
-    // =========================
-    const allowedSheets = ["Ret 2", "Ret 3", "Ret 4"];
-
-    if (allowedSheets.includes(sheetName) && editedCol === statusCol + 1) {
-      stackRetentionFinal_elegan_changedetection_V4();
-    }
-
-  } catch (err) {
-    Logger.log(err);
   }
+  const typePayment = row[col(header, "Type Payment")];
+
+if (!typePayment) {
+  SpreadsheetApp.getUi().alert("❌ Type Payment wajib diisi sebelum lanjut.");
+  sheet.getRange(rowIndex, statusCol + 1).setValue("");
+  return;
 }
+
+
+  const fpFields = [
+    "FP Date",
+    "FP Amount",
+    "FP Invoice Number"
+  ];
+
+  const isFPFilled = fpFields.every(f => row[col(header, f)]);
+
+  if (!isFPFilled) {
+    SpreadsheetApp.getUi().alert(
+      "❌ Harus isi salah satu:\n\nDP (Date, Amount, Invoice)\nATAU\nFP (Date, Amount, Invoice)"
+    );
+    sheet.getRange(rowIndex, statusCol + 1).setValue("");
+    return;
+  }
+
+  // 🔥 PUSH
+  const currentRet = parseInt(sheetName.replace("Ret ", ""));
+  const nextRet = currentRet + 1;
+
+  pushSingleRow(sheetName, `Ret ${nextRet}`, nextRet, rowIndex);
+}
+
 
 /**
  * 🔥 PUSH 1 ROW (ANTI DUPLICATE + NO OVERWRITE SOURCE)
@@ -117,17 +112,10 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const source = ss.getSheetByName(sourceName);
 
-    // 🔥 ambil header langsung (bukan dari data)
-    const header = source.getRange(2,1,1,source.getLastColumn()).getValues()[0];
+    const data = source.getDataRange().getValues();
+    const header = data[1];
+    const row = data[rowIndex - 1];
 
-    // 🔥 pastikan data terbaru kebaca
-    SpreadsheetApp.flush();
-    Utilities.sleep(50);
-
-    // 🔥 ambil row terbaru
-    const row = source.getRange(rowIndex, 1, 1, source.getLastColumn()).getValues()[0];
-
-    
     const idx = {
       id: col(header,"Sparks ID"),
       cycle: col(header,"Cycle"),
@@ -199,12 +187,10 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
       "Total Session Retention Package",
       "Last Membership Date",
       "Actual Last Membership Date",
-      "DP Date",
-      "DP Amount",
-      "DP Invoice Number",
       "FP Date",
       "FP Amount",
       "FP Invoice Number",
+      "Type Payment",
       "Total Actual Payment",
       "SA Retention",
       "Impacted Holiday",
@@ -216,8 +202,6 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
     newRow[col(header,"Age Group Now")] = "";
 
     target.appendRow(newRow);
-    // Master Stack
-    stackRetentionFinal_elegan_changedetection_V4();
 
   } finally {
     lock.releaseLock();
@@ -444,10 +428,8 @@ function resetRetentionExceptRet1() {
     "Retention Package",
     "FP Date",
     "FP Amount",
-    "DP Date",
-    "DP Amount",
-    "DP Invoice Number",
     "FP Invoice Number",
+    "Type Payment",
     "Total Actual Payment",
     "Impacted Holiday",
     "Other Impact"
@@ -472,160 +454,4 @@ function resetRetentionExceptRet1() {
   }
 
   SpreadsheetApp.getUi().alert("✅ Ret 2 ke atas sudah di-reset!");
-}
-
-
-
-function stackRetentionFinal_elegan_changedetection_V4() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const target = ss.getSheetByName("Master Stack");
-
-  const sheets = ["Ret 1", "Ret 2", "Ret 3", "Ret 4"];
-  const START_ROW = 3;
-
-  const ID_COL = 2;
-
-  const now = new Date();
-
-  const lastRow = target.getLastRow();
-  const lastCol = target.getLastColumn();
-
-  let existingData = [];
-  let idMap = {};
-
-  // =========================
-  // 🔥 LOAD DATA MASTER STACK
-  // =========================
-  if (lastRow >= START_ROW) {
-
-    existingData = target
-      .getRange(START_ROW, 1, lastRow - 2, lastCol)
-      .getValues();
-
-    existingData.forEach((row, i) => {
-      const key = row[ID_COL - 1];
-      if (key) {
-        idMap[key] = {
-          rowIndex: i + START_ROW,
-          rowData: row,
-          firstSeen: row[lastCol - 3]
-        };
-      }
-    });
-  }
-
-  let appendData = [];
-
-  // =========================
-  // 🔥 LOOP SEMUA RET SHEET
-  // =========================
-  sheets.forEach(sheetName => {
-
-    const sh = ss.getSheetByName(sheetName);
-    if (!sh) return;
-
-    const lastRow = sh.getLastRow();
-    if (lastRow < START_ROW) return;
-
-    // 🔥 HEADER DINAMIS (FIX BUG)
-    const header = sh.getRange(2,1,1,sh.getLastColumn()).getValues()[0];
-    const STATUS_COL = col(header, "Retention Status");
-
-    const data = sh
-      .getRange(START_ROW, 1, lastRow - 2, sh.getLastColumn())
-      .getValues();
-
-    data.forEach(row => {
-
-      const key = row[ID_COL - 1];
-      if (!key) return;
-
-      const status = row[STATUS_COL];
-      const isRet1 = sheetName === "Ret 1";
-
-      // 🔥 FILTER LOGIC
-      if (!isRet1 && String(status).trim().toLowerCase() !== "paid") return;
-
-      const center = String(key).substring(0, 3);
-
-      // =========================
-      // 🔄 UPDATE EXISTING
-      // =========================
-      if (idMap[key]) {
-
-        const existing = idMap[key];
-        const existingCore = existing.rowData.slice(0, row.length);
-
-        let isChanged = false;
-
-        for (let i = 0; i < row.length; i++) {
-          if (existingCore[i] !== row[i]) {
-            isChanged = true;
-            break;
-          }
-        }
-
-        if (isChanged) {
-
-          const newRow = [
-            ...row,
-            center,
-            existing.firstSeen || now,
-            now,
-            sheetName,
-            sheetName
-          ];
-
-          target
-            .getRange(existing.rowIndex, 1, 1, newRow.length)
-            .setValues([newRow]);
-        }
-
-      } 
-      
-      // =========================
-      // ➕ INSERT BARU
-      // =========================
-      else {
-
-        const newRow = [
-          ...row,
-          center,
-          now,
-          now,
-          sheetName,
-          sheetName
-        ];
-
-        appendData.push(newRow);
-      }
-
-    });
-
-  });
-
-  // =========================
-  // ➕ APPEND KE MASTER
-  // =========================
-  if (appendData.length > 0) {
-
-    const start = target.getLastRow() + 1;
-
-    target
-      .getRange(start, 1, appendData.length, appendData[0].length)
-      .setValues(appendData);
-  }
-
-}
-function resetMasterStack() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Master Stack");
-
-  if (sheet.getLastRow() > 2) {
-    sheet.getRange(3,1,sheet.getLastRow()-2,sheet.getLastColumn()).clearContent();
-  }
-
-  SpreadsheetApp.getUi().alert("✅ Master Stack cleared!");
 }
