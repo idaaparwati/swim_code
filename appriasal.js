@@ -361,10 +361,11 @@ function syncActiveStudentsByCenter(selectedCenter) {
        {
 
         foundMatch = true;
-    const primaryKey = (
+      const primaryKey = (
         name +
         ageGroupRaw +
         levelRaw +
+        coach +       // ✅ WAJIB TAMBAH
         metrics +
         skill
       ).toLowerCase().trim();
@@ -440,15 +441,15 @@ function dailyAutomation() {
 function regeneratePrimaryKeyOnly() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getActiveSheet(); // atau spesifik: getSheetByName("Student Progressing - KLM")
+  const sheet = ss.getActiveSheet(); // atau spesifik sheet
 
   const data = sheet.getDataRange().getValues();
-
   const headers = data[0];
 
   const colName = headers.indexOf("Student Name");
   const colAge = headers.indexOf("Age Group");
   const colLevel = headers.indexOf("Level");
+  const colCoach = headers.indexOf("Coach"); // ✅ NEW
   const colMetrics = headers.indexOf("Metrics");
   const colSkill = headers.indexOf("Skill");
   const colPK = headers.indexOf("Primary Key");
@@ -458,11 +459,15 @@ function regeneratePrimaryKeyOnly() {
     return;
   }
 
+  // ⚡ pakai array (biar cepat, bukan setValue per row)
+  const pkValues = [];
+
   for (let i = 1; i < data.length; i++) {
 
     const name = data[i][colName];
     const ageGroup = data[i][colAge];
     const level = data[i][colLevel];
+    const coach = data[i][colCoach]; // ✅ NEW
     const metrics = data[i][colMetrics];
     const skill = data[i][colSkill];
 
@@ -470,13 +475,16 @@ function regeneratePrimaryKeyOnly() {
       name +
       ageGroup +
       level +
+      coach +        // ✅ IMPORTANT
       metrics +
       skill
     ).toLowerCase().trim();
 
-    sheet.getRange(i + 1, colPK + 1).setValue(primaryKey);
+    pkValues.push([primaryKey]);
   }
 
-  Logger.log("✅ Primary Key regenerated (no separator)");
+  // ⚡ sekali tulis (super cepat)
+  sheet.getRange(2, colPK + 1, pkValues.length, 1).setValues(pkValues);
 
+  Logger.log("✅ Primary Key regenerated (with coach)");
 }
