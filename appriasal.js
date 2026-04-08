@@ -408,3 +408,97 @@ function regeneratePrimaryKeyOnly() {
 
   Logger.log("✅ Primary Key regenerated with separator");
 }
+
+function addAndSyncSessionData() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const controlSheet = ss.getSheetByName("Control");
+  const selectedCenter = controlSheet.getRange("B1").getValue().toString().trim();
+
+  const sheet = ss.getSheetByName("Student Progressing - " + selectedCenter);
+  const master = ss.getSheetByName("Master Student List SWIM");
+
+  if (!sheet || !master) {
+    Logger.log("Sheet not found");
+    return;
+  }
+
+  const header = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+
+  let totalCol, usedCol, leftCol, validCol;
+
+  // ✅ kalau belum ada Total Sesi → buat semua
+  if (!header.includes("Total Sesi")) {
+
+    const lastCol = sheet.getLastColumn();
+    sheet.insertColumnsAfter(lastCol, 4);
+
+    sheet.getRange(1, lastCol + 1, 1, 4).setValues([[
+      "Total Sesi",
+      "Sesi Terpakai",
+      "Sesi Tersisa",
+      "Valid Session"
+    ]]);
+
+    totalCol = lastCol + 1;
+    usedCol = lastCol + 2;
+    leftCol = lastCol + 3;
+    validCol = lastCol + 4;
+
+  } else {
+
+    totalCol = header.indexOf("Total Sesi") + 1;
+    usedCol = header.indexOf("Sesi Terpakai") + 1;
+    leftCol = header.indexOf("Sesi Tersisa") + 1;
+
+    // ✅ kalau Valid Session belum ada → insert setelah Sesi Tersisa
+    if (!header.includes("Valid Session")) {
+      sheet.insertColumnAfter(leftCol);
+      sheet.getRange(1, leftCol + 1).setValue("Valid Session");
+      validCol = leftCol + 1;
+    } else {
+      validCol = header.indexOf("Valid Session") + 1;
+    }
+  }
+
+  // 🔑 ambil data master
+  const masterData = master.getDataRange().getValues();
+  const masterMap = {};
+
+  for (let i = 1; i < masterData.length; i++) {
+
+  const id = masterData[i][1];     // ✅ INI YANG KURANG
+  const total = masterData[i][8];  // I
+  const used = masterData[i][9];   // J
+  const left = masterData[i][10];  // K
+  const valid = masterData[i][11]; // L
+
+  if (id) {
+    masterMap[id] = {
+      total: total || 0,
+      used: used || 0,
+      left: left || 0,
+      valid: valid || 0
+    };
+  }
+}
+
+  // 🔄 update ke progressing
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+
+    const studentID = data[i][1];
+
+    if (masterMap[studentID]) {
+
+      sheet.getRange(i + 1, totalCol).setValue(masterMap[studentID].total);
+      sheet.getRange(i + 1, usedCol).setValue(masterMap[studentID].used);
+      sheet.getRange(i + 1, leftCol).setValue(masterMap[studentID].left);
+      sheet.getRange(i + 1, validCol).setValue(masterMap[studentID].valid);
+
+    }
+  }
+
+  Logger.log("✅ Session + Valid Session synced");
+}
