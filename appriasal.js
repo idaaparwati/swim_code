@@ -166,115 +166,6 @@ function generateStudentProgressPerCenter() {
 
 }
 
-function syncActiveStudentsOnly() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const controlSheet = ss.getSheetByName("Control");
-  const selectedCenter = controlSheet.getRange("B1").getValue().toString().trim();
-
-  if (!selectedCenter) {
-    SpreadsheetApp.getUi().alert("⚠️ Please select center in Control!B1 first.");
-    return;
-  }
-
-  syncActiveStudentsByCenter(selectedCenter);
-
-}
-
-function addAndSyncSessionData() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const controlSheet = ss.getSheetByName("Control");
-  const selectedCenter = controlSheet.getRange("B1").getValue().toString().trim();
-
-  const sheet = ss.getSheetByName("Student Progressing - " + selectedCenter);
-  const master = ss.getSheetByName("Master Student List SWIM");
-
-  if (!sheet || !master) {
-    Logger.log("Sheet not found");
-    return;
-  }
-
-  const header = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-
-  let totalCol, usedCol, leftCol, validCol;
-
-  // ✅ kalau belum ada Total Sesi → buat semua
-  if (!header.includes("Total Sesi")) {
-
-    const lastCol = sheet.getLastColumn();
-    sheet.insertColumnsAfter(lastCol, 4);
-
-    sheet.getRange(1, lastCol + 1, 1, 4).setValues([[
-      "Total Sesi",
-      "Sesi Terpakai",
-      "Sesi Tersisa",
-      "Valid Session"
-    ]]);
-
-    totalCol = lastCol + 1;
-    usedCol = lastCol + 2;
-    leftCol = lastCol + 3;
-    validCol = lastCol + 4;
-
-  } else {
-
-    totalCol = header.indexOf("Total Sesi") + 1;
-    usedCol = header.indexOf("Sesi Terpakai") + 1;
-    leftCol = header.indexOf("Sesi Tersisa") + 1;
-
-    // ✅ kalau Valid Session belum ada → insert setelah Sesi Tersisa
-    if (!header.includes("Valid Session")) {
-      sheet.insertColumnAfter(leftCol);
-      sheet.getRange(1, leftCol + 1).setValue("Valid Session");
-      validCol = leftCol + 1;
-    } else {
-      validCol = header.indexOf("Valid Session") + 1;
-    }
-  }
-
-  // 🔑 ambil data master
-  const masterData = master.getDataRange().getValues();
-  const masterMap = {};
-
-  for (let i = 1; i < masterData.length; i++) {
-
-  const id = masterData[i][1];     // ✅ INI YANG KURANG
-  const total = masterData[i][8];  // I
-  const used = masterData[i][9];   // J
-  const left = masterData[i][10];  // K
-  const valid = masterData[i][11]; // L
-
-  if (id) {
-    masterMap[id] = {
-      total: total || 0,
-      used: used || 0,
-      left: left || 0,
-      valid: valid || 0
-    };
-  }
-}
-
-  // 🔄 update ke progressing
-  const data = sheet.getDataRange().getValues();
-
-  for (let i = 1; i < data.length; i++) {
-
-    const studentID = data[i][1];
-
-    if (masterMap[studentID]) {
-
-      sheet.getRange(i + 1, totalCol).setValue(masterMap[studentID].total);
-      sheet.getRange(i + 1, usedCol).setValue(masterMap[studentID].used);
-      sheet.getRange(i + 1, leftCol).setValue(masterMap[studentID].left);
-      sheet.getRange(i + 1, validCol).setValue(masterMap[studentID].valid);
-
-    }
-  }
-
-  Logger.log("✅ Session + Valid Session synced");
-}
-
 function syncActiveStudentsByCenter(selectedCenter) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -294,7 +185,15 @@ function syncActiveStudentsByCenter(selectedCenter) {
 
   const TOTAL_WEEKS = 48;
 
-  // HEADER
+  // 🔥 SUPER CLEAN (FIX SEMUA MASALAH STRING)
+  const clean = (val) =>
+  val
+    ?.toString()
+    .toLowerCase()
+    .replace(/\u00A0/g, " ")  // 🔥 ubah NBSP jadi spasi normal
+    .replace(/\s+/g, " ")     // 🔥 rapihin spasi jadi 1
+    .trim();                  // 🔥 hapus depan & belakang
+  // ================= HEADER =================
   const header = [
     "Center","Student ID","Student Name","Age Group",
     "Level","Coach","Metrics","Skill"
@@ -306,64 +205,77 @@ function syncActiveStudentsByCenter(selectedCenter) {
 
   header.push("Primary Key");
 
-  // create header once
-  if (outputSheet.getLastRow() === 0) {
+  if (outputSheet.getLastRow() <= 1) {
     outputSheet.getRange(1,1,1,header.length).setValues([header]);
     outputSheet.getRange(1,1,1,header.length).setFontWeight("bold");
   }
 
-  // existing PK
-  const existingData = outputSheet.getDataRange().getValues();
-  const existingPK = new Set();
+  // ================= AMBIL STUDENT ID YANG ADA =================
+  const lastRow = outputSheet.getLastRow();
+  const existingStudentIDs = new Set();
 
-// isi dari sheet
-if (existingData.length > 1) {
-  for (let i = 1; i < existingData.length; i++) {
-    const pk = existingData[i][existingData[i].length - 1];
-    if (pk) existingPK.add(pk.toString().toLowerCase().trim());
+  if (lastRow > 1) {
+    const idColumn = outputSheet.getRange(2, 2, lastRow - 1).getValues();
+
+    idColumn.forEach(r => {
+      if (r[0]) {
+        existingStudentIDs.add(clean(r[0]));
+      }
+    });
   }
-}
-  
 
   const result = [];
+  const selected = clean(selectedCenter);
 
+  // ================= LOOP STUDENT =================
   for (let i = 1; i < students.length; i++) {
 
-    const center = students[i][0]?.toString().trim();
+    const center = clean(students[i][0]);
     const studentID = students[i][1];
     const name = students[i][2];
     const ageGroupRaw = students[i][3];
     const levelRaw = students[i][5];
     const coach = students[i][6];
-    const status = students[i][7]?.toString().trim().toLowerCase();
+    const status = clean(students[i][7]);
 
-    if (center !== selectedCenter) continue;
+    if (center !== selected) continue;
     if (!name) continue;
-    if (status !== "active") continue;
+    if (!status.includes("active")) continue;
     if (!levelRaw || levelRaw === "0") continue;
 
-    // normalize
-    const ageGroup = ageGroupRaw?.toString().toLowerCase().trim();
-    const level = levelRaw?.toString().toLowerCase().trim();
+    const currentID = clean(studentID);
+
+    // 🔥 LOGIC UTAMA KAMU
+    if (existingStudentIDs.has(currentID)) {
+      Logger.log("⏭ SKIP → " + name);
+      continue;
+    }
+
+    const ageGroup = clean(ageGroupRaw);
+    const level = clean(levelRaw);
 
     let foundMatch = false;
 
+    // ================= LOOP TEMPLATE =================
     for (let j = 1; j < templates.length; j++) {
 
-      const tAge = templates[j][0]?.toString().toLowerCase().trim();
-      const tLevel = templates[j][1]?.toString().toLowerCase().trim();
+      const tAge = clean(templates[j][0]);
+      const tLevel = clean(templates[j][1]);
       const metrics = templates[j][2];
       const skill = templates[j][3];
 
-      // FLEXIBLE MATCH
-    if (
-      ageGroup === tAge &&
-      level === tLevel
-    )
-       {
+      // 🔥 FLEXIBLE MATCH (ANTI ERROR DATA)
+      const ageMatch =
+        ageGroup.includes(tAge) || tAge.includes(ageGroup);
+
+      const levelMatch =
+        level.includes(tLevel) || tLevel.includes(level);
+
+      if (ageMatch && levelMatch) {
 
         foundMatch = true;
-    const primaryKey = [
+
+       const primaryKey = [
         name,
         ageGroupRaw,
         levelRaw,
@@ -371,13 +283,11 @@ if (existingData.length > 1) {
         metrics,
         skill
       ]
-  .map(v => v.toString().toLowerCase().trim())
-  .join("|");
-        if (existingPK.has(primaryKey)) continue;
-        existingPK.add(primaryKey); // ✅ WAJIB TAMBAH INI
+        .map(v => clean(v))
+        .join("|");
 
         const row = [
-          center,
+          students[i][0],
           studentID,
           name,
           ageGroupRaw,
@@ -397,34 +307,26 @@ if (existingData.length > 1) {
       }
     }
 
-    // DEBUG kalau tidak ada template match
     if (!foundMatch) {
-      Logger.log("❌ NO TEMPLATE → " + name + " | " + ageGroup + " | " + level);
+      Logger.log(`❌ NO TEMPLATE → ${name} | ${ageGroup} | ${level}`);
     }
   }
 
- if (result.length > 0) {
+  // ================= WRITE =================
+  if (result.length > 0) {
 
-  const lastRow = outputSheet.getLastRow();
+  const startRow = outputSheet.getLastRow() + 1;
 
-  outputSheet.getRange(lastRow + 1, 1, result.length, header.length).setValues(result);
+  outputSheet.getRange(startRow, 1, result.length, header.length).setValues(result);
 
-  const scoreStartColumn = 9;
-  const scoreRange = outputSheet.getRange(lastRow + 1, scoreStartColumn, result.length, TOTAL_WEEKS);
+  const studentCount = new Set(result.map(r => r[1])).size;
 
-  const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(["Mastered", "Progressing", "Exploring"], true)
-    .setAllowInvalid(false)
-    .build();
-
-  scoreRange.setDataValidation(rule);
-
-  Logger.log("✅ New students added: " + result.length);
+  Logger.log("✅ Students added: " + studentCount);
+  Logger.log("📊 Rows added: " + result.length);
 
 } else {
   Logger.log("ℹ️ No new students found");
 }
-
 }
 
 function syncAllCenters() {
@@ -443,10 +345,23 @@ function dailyAutomation() {
 }
 
 
+function runSync() {
+  syncActiveStudentsByCenter("KLM");
+}
+
 function regeneratePrimaryKeyOnly() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
+  // 🔥 TARUH CLEAN DI ATAS
+  const clean = (val) =>
+    val
+      ?.toString()
+      .toLowerCase()
+      .replace(/\u00A0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
 
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -483,8 +398,8 @@ function regeneratePrimaryKeyOnly() {
       metrics,
       skill
     ]
-      .map(v => v.toString().toLowerCase().trim())
-      .join("|");
+      .map(v => clean(v))   // 🔥 pakai clean
+      .join("|");           // 🔥 separator
 
     pkValues.push([primaryKey]);
   }
