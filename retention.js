@@ -10,10 +10,18 @@
  */
 
 function col(header, name) {
-  const clean = h => h.toString().toLowerCase().replace(/\s+/g, ' ').trim();
+  const clean = h => h.toString().toLowerCase().replace(/\s+/g, '').trim();
   const idx = header.map(h => clean(h)).indexOf(clean(name));
   if (idx === -1) throw new Error("Kolom tidak ditemukan: " + name);
   return idx;
+}
+
+function getNextRow(sheet) {
+  const data = sheet.getRange("A:A").getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i][0] !== "") return i + 2;
+  }
+  return 3;
 }
 
 
@@ -81,6 +89,75 @@ function onEdit(e) {
   Logger.log("✅ VALIDASI OK");
 }
 
+function pushSingleRowSafe(source, target, sourceHeader, targetHeader, row, newKey, cycle) {
+
+  Logger.log("🚀 PUSH START: " + newKey);
+
+  const newRow = new Array(targetHeader.length).fill("");
+
+  // COPY FIELD
+  for (let i = 0; i < sourceHeader.length; i++) {
+    let colName = sourceHeader[i];
+    try {
+      let targetIndex = col(targetHeader, colName);
+      newRow[targetIndex] = row[i];
+    } catch(err) {}
+  }
+
+  // SET KEY & CYCLE
+  try {
+    newRow[col(targetHeader,"Unique Key")] = newKey;
+    newRow[col(targetHeader,"Cycle")] = cycle;
+  } catch(err) {}
+
+  // MAPPING
+  const mapping = {
+    "Previous Join Date": "Join Date Retention",
+    "Previous Last Membership Date": "Actual Last Membership Date",
+    "Previous Age": "Age Now",
+    "Previous Age Group": "Age Group Now",
+    "Previous Package": "Retention Package",
+    "Previous Total Session": "Total Session Retention Package",
+    "Previous FP Date": "FP Date",
+    "SA Aquisition": "SA Retention"
+  };
+
+  for (let targetField in mapping) {
+    try {
+      let targetIndex = col(targetHeader, targetField);
+      let sourceIndex = col(sourceHeader, mapping[targetField]);
+
+      newRow[targetIndex] = row[sourceIndex];
+
+      Logger.log("🔁 MAP: " + mapping[targetField] + " → " + targetField);
+
+    } catch(err) {
+      Logger.log("⚠️ MAP FAIL: " + targetField);
+    }
+  }
+
+  // RESET FIELD
+  const resetFields = [
+    "SA Retention","Retention Status","Churn Reason","Response Notes",
+    "Join Date Retention","Retention Package","Total Session Retention Package",
+    "FP Date","FP Amount","FP Invoice Number","Type Payment",
+    "Total Actual Payment","Impacted Holiday","Other Impact",
+    "Last Membership Date","Actual Last Membership Date",
+    "Age Now","Age Group Now"
+  ];
+
+  resetFields.forEach(field => {
+    try {
+      newRow[col(targetHeader, field)] = "";
+    } catch(err) {}
+  });
+
+  const nextRow = getNextRow(target);
+
+  target.getRange(nextRow, 1, 1, newRow.length).setValues([newRow]);
+
+  Logger.log("✅ PUSH SUCCESS: " + newKey + " → row " + nextRow);
+}
 
 
 // CORE System Time-Driven Push to Next Ret
@@ -89,24 +166,22 @@ function processRetentionSafe() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const MAX_RET = 5;
 
-  Logger.log("🚀 START PROCESS");
+  Logger.log("========== START PROCESS ==========");
 
   for (let current = 1; current < MAX_RET; current++) {
 
-    Logger.log("➡️ PROCESS RET " + current + " → RET " + (current + 1));
+    Logger.log("👉 PROCESS RET " + current + " → RET " + (current+1));
 
     let source = ss.getSheetByName(`Ret ${current}`);
     let target = ss.getSheetByName(`Ret ${current + 1}`);
 
     if (!source) {
-      Logger.log("❌ SOURCE NOT FOUND");
+      Logger.log("❌ SOURCE NOT FOUND: Ret " + current);
       continue;
     }
 
-    // 🔥 AUTO CREATE SHEET
     if (!target) {
-      Logger.log("🆕 CREATE SHEET Ret " + (current + 1));
-
+      Logger.log("🆕 CREATE SHEET: Ret " + (current+1));
       target = ss.insertSheet(`Ret ${current + 1}`);
       const headerRange = source.getRange(1,1,2,source.getLastColumn());
       headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
@@ -116,16 +191,12 @@ function processRetentionSafe() {
     const data = source.getDataRange().getValues();
     const header = data[1];
 
+    const targetData = target.getDataRange().getValues();
     const targetHeader = target.getRange(2,1,1,target.getLastColumn()).getValues()[0];
-    const targetLastRow = target.getLastRow();
-
-    Logger.log("📊 SOURCE ROWS: " + data.length);
-    Logger.log("📊 TARGET ROWS: " + targetLastRow);
 
     const idx = {
       id: col(header,"Sparks ID"),
       status: col(header,"Retention Status"),
-
       joinRet: col(header,"Join Date Retention"),
       lastMember: col(header,"Actual Last Membership Date"),
       ageNow: col(header,"Age Now"),
@@ -136,28 +207,17 @@ function processRetentionSafe() {
       sa: col(header,"SA Retention")
     };
 
-    // 🔥 BUILD MAP (ANTI GHOST)
+    // BUILD MAP
     let targetMap = {};
-
-    if (targetLastRow >= 3) {
-
-      const validData = target.getRange(3,1,targetLastRow-2,target.getLastColumn()).getValues();
-
-      validData.forEach((row, i) => {
-
-        let key = row[col(targetHeader,"Unique Key")];
-
-        let rowCheck = row.join("").trim();
-
-        if (key && rowCheck !== "") {
-          targetMap[key.toString().trim()] = i + 2;
-        }
-      });
+    for (let i = 2; i < targetData.length; i++) {
+      let key = targetData[i][col(targetHeader,"Unique Key")];
+      if (key) {
+        targetMap[key.toString().trim()] = i;
+      }
     }
 
-    Logger.log("🗺️ MAP SIZE: " + Object.keys(targetMap).length);
+    Logger.log("📦 EXISTING DATA: " + Object.keys(targetMap).length);
 
-    // 🔥 LOOP SOURCE
     for (let i = 2; i < data.length; i++) {
 
       let row = data[i];
@@ -165,35 +225,28 @@ function processRetentionSafe() {
       let status = row[idx.status];
       let clean = status ? status.toString().trim().toLowerCase() : "";
 
-      Logger.log("------");
-      Logger.log("ROW " + (i+1));
-      Logger.log("STATUS RAW: [" + status + "]");
-      Logger.log("STATUS CLEAN: [" + clean + "]");
+      Logger.log("🔍 ROW " + i + " STATUS: [" + status + "]");
 
-      if (clean !== "paid") {
+      if (!clean.includes("paid")) {
         Logger.log("⏭️ SKIP (NOT PAID)");
         continue;
       }
 
       let id = row[idx.id];
-
-      Logger.log("ID: [" + id + "]");
-
       if (!id) {
-        Logger.log("⏭️ SKIP (NO ID)");
+        Logger.log("⚠️ NO ID");
         continue;
       }
 
       id = id.toString().trim();
-
       let newKey = id + "-C" + (current + 1);
 
-      Logger.log("NEW KEY: " + newKey);
+      Logger.log("🎯 PROCESS KEY: " + newKey);
 
-      // 🔥 PUSH
+      // PUSH
       if (!targetMap[newKey]) {
 
-        Logger.log("🆕 PUSHING...");
+        Logger.log("🆕 NEW DATA → PUSH");
 
         pushSingleRowSafe(
           source,
@@ -205,12 +258,11 @@ function processRetentionSafe() {
           current + 1
         );
 
-        Logger.log("✅ PUSH SUCCESS: " + newKey);
         continue;
       }
 
-      // 🔄 UPDATE
-      Logger.log("🔄 UPDATE EXISTING: " + newKey);
+      // UPDATE
+      Logger.log("🔄 UPDATE EXISTING");
 
       let rowIndex = targetMap[newKey] + 1;
 
@@ -226,22 +278,20 @@ function processRetentionSafe() {
       };
 
       for (let field in mapping) {
-
         try {
           let colIndex = col(targetHeader, field);
-
           target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
 
-          Logger.log("✔ UPDATE " + field);
+          Logger.log("✔ UPDATE FIELD: " + field);
 
         } catch(err) {
-          Logger.log("❌ ERROR FIELD: " + field);
+          Logger.log("❌ UPDATE FAIL: " + field);
         }
       }
     }
   }
 
-  Logger.log("🏁 PROCESS DONE");
+  Logger.log("========== END PROCESS ==========");
 }
 
 
@@ -291,90 +341,7 @@ function setupDateValidation() {
 }
 
 
-/**
- * 🔥 PUSH 1 ROW (ANTI DUPLICATE + NO OVERWRITE SOURCE)
- */
-function pushSingleRowSafe(source, target, sourceHeader, targetHeader, row, newKey, cycle) {
 
-  const newRow = new Array(targetHeader.length).fill("");
-
-  // 🔥 COPY SEMUA FIELD YANG MATCH
-  for (let i = 0; i < sourceHeader.length; i++) {
-    let colName = sourceHeader[i];
-
-    try {
-      let targetIndex = col(targetHeader, colName);
-      newRow[targetIndex] = row[i];
-    } catch(err) {}
-  }
-
-  // 🔥 SET UNIQUE KEY
-  try {
-    newRow[col(targetHeader,"Unique Key")] = newKey;
-  } catch(err) {}
-
-  // 🔥 SET CYCLE
-  try {
-    newRow[col(targetHeader,"Cycle")] = cycle;
-  } catch(err) {}
-
-  // 🔥 MAPPING KHUSUS (INI YANG FIX MASALAH LU)
-  const mapping = {
-    "Previous Join Date": "Join Date Retention",
-    "Previous Last Membership Date": "Actual Last Membership Date",
-    "Previous Age": "Age Now",
-    "Previous Age Group": "Age Group Now",
-    "Previous Package": "Retention Package",
-    "Previous Total Session": "Total Session Retention Package",
-    "Previous FP Date": "FP Date",
-    "SA Aquisition": "SA Retention"
-  };
-
-  for (let targetField in mapping) {
-    try {
-      let targetIndex = col(targetHeader, targetField);
-      let sourceIndex = col(sourceHeader, mapping[targetField]);
-
-      newRow[targetIndex] = row[sourceIndex];
-    } catch(err) {}
-  }
-
-  // 🔥 RESET FIELD USER (BIAR INPUT BARU BERSIH)
-  const resetFields = [
-    "SA Retention",
-    "Retention Status",
-    "Churn Reason",
-    "Response Notes",
-    "Join Date Retention",
-    "Retention Package",
-    "Total Session Retention Package",
-    "FP Date",
-    "FP Amount",
-    "FP Invoice Number",
-    "Type Payment",
-    "Total Actual Payment",
-    "Impacted Holiday",
-    "Other Impact",
-    "Last Membership Date",
-    "Actual Last Membership Date",
-    "Age Now",
-    "Age Group Now"
-  ];
-
-  resetFields.forEach(field => {
-    try {
-      newRow[col(targetHeader, field)] = "";
-    } catch(err) {}
-  });
-
- function getNextRow(sheet) {
-  const data = sheet.getRange("A:A").getValues();
-  for (let i = data.length - 1; i >= 0; i--) {
-    if (data[i][0] !== "") return i + 2;
-  }
-  return 3; // start dari row 3 (karena header 2 row)
-}
-}
 
 
 function resetAllRetSheets() {
