@@ -8,6 +8,7 @@
 /**
  * 🔧 Helper kolom
  */
+
 function col(header, name) {
   const clean = h => h.toString().toLowerCase().replace(/\s+/g, ' ').trim();
   const idx = header.map(h => clean(h)).indexOf(clean(name));
@@ -16,11 +17,11 @@ function col(header, name) {
 }
 
 
-/**
- * 🔥 REALTIME (HANYA SAAT PAID)
- */
+
+
+// ON edit warning only (tidak push ke Ret Selanjutnya)
+
 function onEdit(e) {
-  Logger.log("EDIT DETECTED");
 
   const sheet = e.source.getActiveSheet();
   const sheetName = sheet.getName();
@@ -30,96 +31,100 @@ function onEdit(e) {
   const rowIndex = e.range.getRow();
   if (rowIndex < 3) return;
 
-  const header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const header = sheet.getRange(2,1,1,sheet.getLastColumn()).getValues()[0];
 
-  const statusCol = col(header, "Retention Status");
+  const statusCol = col(header,"Retention Status");
   const editedCol = e.range.getColumn();
-  const value = e.range.getValue();
 
-  Logger.log("Value: " + value);
-  Logger.log("Column: " + editedCol);
-
-  // ✅ filter dulu (INI PENTING BANGET)
   if (editedCol !== statusCol + 1) return;
-  if (!value || value.toString().trim().toLowerCase() !== "paid") return;
 
-  // ✅ delay SEKALI aja (biar semua input settle)
-  Utilities.sleep(800);
+  Utilities.sleep(300);
 
-  // ✅ ambil row SETELAH delay
-  const row = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const row = sheet.getRange(rowIndex,1,1,sheet.getLastColumn()).getValues()[0];
 
-  // 🔥 VALIDASI WAJIB
+  const value = row[statusCol];
+  const clean = value ? value.toString().trim().toLowerCase() : "";
+
+  if (clean !== "paid") return;
+
+  // VALIDASI
   const requiredFields = [
     "SA Retention",
-    "Retention Status",
     "Churn Reason",
     "Join Date Retention",
     "Retention Package"
   ];
 
   for (let field of requiredFields) {
-    let val = row[col(header, field)];
-    if (!val) {
-      SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi sebelum lanjut.`);
+    if (!row[col(header, field)]) {
+      SpreadsheetApp.getUi().alert(`❌ Kolom "${field}" wajib diisi`);
       sheet.getRange(rowIndex, statusCol + 1).setValue("");
       return;
     }
   }
-  const typePayment = row[col(header, "Type Payment")];
 
-if (!typePayment) {
-  SpreadsheetApp.getUi().alert("❌ Type Payment wajib diisi sebelum lanjut.");
-  sheet.getRange(rowIndex, statusCol + 1).setValue("");
-  return;
-}
-
-
-  const fpFields = [
-    "FP Date",
-    "FP Amount",
-    "FP Invoice Number"
-  ];
-
-  const isFPFilled = fpFields.every(f => row[col(header, f)]);
-
-  if (!isFPFilled) {
-    SpreadsheetApp.getUi().alert(
-      "❌ Harus isi salah satu:\n\nDP (Date, Amount, Invoice)\nATAU\nFP (Date, Amount, Invoice)"
-    );
+  if (!row[col(header,"Type Payment")]) {
+    SpreadsheetApp.getUi().alert("❌ Type Payment wajib diisi");
     sheet.getRange(rowIndex, statusCol + 1).setValue("");
     return;
   }
 
-  // 🔥 PUSH
-  const currentRet = parseInt(sheetName.replace("Ret ", ""));
-  const nextRet = currentRet + 1;
+  const fpFields = ["FP Date","FP Amount","FP Invoice Number"];
+  const isFPFilled = fpFields.every(f => row[col(header,f)]);
 
-  pushSingleRow(sheetName, `Ret ${nextRet}`, nextRet, rowIndex);
+  if (!isFPFilled) {
+    SpreadsheetApp.getUi().alert("❌ FP harus lengkap");
+    sheet.getRange(rowIndex, statusCol + 1).setValue("");
+    return;
+  }
+
+  Logger.log("✅ VALIDASI OK");
 }
 
 
-/**
- * 🔥 PUSH 1 ROW (ANTI DUPLICATE + NO OVERWRITE SOURCE)
- */
-function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(3000);
+// CORE System Time-Driven Push to Next Ret
+function processRetentionSafe() {
 
-  try {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const MAX_RET = 5;
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const source = ss.getSheetByName(sourceName);
+  Logger.log("🚀 START PROCESS");
+
+  for (let current = 1; current < MAX_RET; current++) {
+
+    Logger.log("➡️ PROCESS RET " + current + " → RET " + (current + 1));
+
+    let source = ss.getSheetByName(`Ret ${current}`);
+    let target = ss.getSheetByName(`Ret ${current + 1}`);
+
+    if (!source) {
+      Logger.log("❌ SOURCE NOT FOUND");
+      continue;
+    }
+
+    // 🔥 AUTO CREATE SHEET
+    if (!target) {
+      Logger.log("🆕 CREATE SHEET Ret " + (current + 1));
+
+      target = ss.insertSheet(`Ret ${current + 1}`);
+      const headerRange = source.getRange(1,1,2,source.getLastColumn());
+      headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
+      target.setFrozenRows(2);
+    }
 
     const data = source.getDataRange().getValues();
     const header = data[1];
-    const row = data[rowIndex - 1];
+
+    const targetHeader = target.getRange(2,1,1,target.getLastColumn()).getValues()[0];
+    const targetLastRow = target.getLastRow();
+
+    Logger.log("📊 SOURCE ROWS: " + data.length);
+    Logger.log("📊 TARGET ROWS: " + targetLastRow);
 
     const idx = {
       id: col(header,"Sparks ID"),
-      cycle: col(header,"Cycle"),
-      unique: col(header,"Unique Key"),
+      status: col(header,"Retention Status"),
 
       joinRet: col(header,"Join Date Retention"),
       lastMember: col(header,"Actual Last Membership Date"),
@@ -128,84 +133,263 @@ function pushSingleRow(sourceName, targetName, nextCycle, rowIndex) {
       packageRet: col(header,"Retention Package"),
       totalSessRet: col(header,"Total Session Retention Package"),
       fpRet: col(header,"FP Date"),
-      fpAmount: col(header,"FP Amount"),
-       saAqc: col(header,"SA Retention")
+      sa: col(header,"SA Retention")
     };
 
-    let id = row[idx.id];
-    if (!id) return;
+    // 🔥 BUILD MAP (ANTI GHOST)
+    let targetMap = {};
 
-    id = id.toString().trim();
-    let newKey = id + "-C" + nextCycle;
+    if (targetLastRow >= 3) {
 
-    let target = ss.getSheetByName(targetName);
+      const validData = target.getRange(3,1,targetLastRow-2,target.getLastColumn()).getValues();
 
-    if (!target) {
-      target = ss.insertSheet(targetName);
-      target.getRange(2,1,1,header.length).setValues([header]);
-      target.setFrozenRows(2);
+      validData.forEach((row, i) => {
+
+        let key = row[col(targetHeader,"Unique Key")];
+
+        let rowCheck = row.join("").trim();
+
+        if (key && rowCheck !== "") {
+          targetMap[key.toString().trim()] = i + 2;
+        }
+      });
     }
 
-    const targetData = target.getDataRange().getValues();
+    Logger.log("🗺️ MAP SIZE: " + Object.keys(targetMap).length);
 
-    // 🔥 ANTI DUPLICATE
-    for (let i = 2; i < targetData.length; i++) {
-      let existingKey = targetData[i][idx.unique];
-      if (existingKey && existingKey.toString().trim() === newKey) {
-        return;
+    // 🔥 LOOP SOURCE
+    for (let i = 2; i < data.length; i++) {
+
+      let row = data[i];
+
+      let status = row[idx.status];
+      let clean = status ? status.toString().trim().toLowerCase() : "";
+
+      Logger.log("------");
+      Logger.log("ROW " + (i+1));
+      Logger.log("STATUS RAW: [" + status + "]");
+      Logger.log("STATUS CLEAN: [" + clean + "]");
+
+      if (clean !== "paid") {
+        Logger.log("⏭️ SKIP (NOT PAID)");
+        continue;
+      }
+
+      let id = row[idx.id];
+
+      Logger.log("ID: [" + id + "]");
+
+      if (!id) {
+        Logger.log("⏭️ SKIP (NO ID)");
+        continue;
+      }
+
+      id = id.toString().trim();
+
+      let newKey = id + "-C" + (current + 1);
+
+      Logger.log("NEW KEY: " + newKey);
+
+      // 🔥 PUSH
+      if (!targetMap[newKey]) {
+
+        Logger.log("🆕 PUSHING...");
+
+        pushSingleRowSafe(
+          source,
+          target,
+          header,
+          targetHeader,
+          row,
+          newKey,
+          current + 1
+        );
+
+        Logger.log("✅ PUSH SUCCESS: " + newKey);
+        continue;
+      }
+
+      // 🔄 UPDATE
+      Logger.log("🔄 UPDATE EXISTING: " + newKey);
+
+      let rowIndex = targetMap[newKey] + 1;
+
+      const mapping = {
+        "Previous Join Date": row[idx.joinRet],
+        "Previous Last Membership Date": row[idx.lastMember],
+        "Previous Age": row[idx.ageNow],
+        "Previous Age Group": row[idx.ageGroupNow],
+        "Previous Package": row[idx.packageRet],
+        "Previous Total Session": row[idx.totalSessRet],
+        "Previous FP Date": row[idx.fpRet],
+        "SA Aquisition": row[idx.sa]
+      };
+
+      for (let field in mapping) {
+
+        try {
+          let colIndex = col(targetHeader, field);
+
+          target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
+
+          Logger.log("✔ UPDATE " + field);
+
+        } catch(err) {
+          Logger.log("❌ ERROR FIELD: " + field);
+        }
       }
     }
-
-    let newRow = [...row];
-
-    // 🔥 UPDATE KEY & CYCLE
-    newRow[idx.cycle] = nextCycle;
-    newRow[idx.unique] = newKey;
-
-    // 🔥 MAPPING PREVIOUS DATA (INI YANG KAMU MAU)
-    newRow[col(header,"Previous Join Date")] = row[idx.joinRet];
-    newRow[col(header,"Previous Last Membership Date")] = row[idx.lastMember];
-    newRow[col(header,"Previous Age")] = row[idx.ageNow];
-    newRow[col(header,"Previous Age Group")] = row[idx.ageGroupNow];
-    newRow[col(header,"Previous Package")] = row[idx.packageRet];
-    newRow[col(header,"Previous Total Session")] = row[idx.totalSessRet];
-    newRow[col(header,"Previous FP Date")] = row[idx.fpRet];
-     newRow[col(header,"SA Aquisition")] = row[idx.saAqc];
-
-
-    // 🔥 CLEAR KOLOM SA (TARGET SAJA)
-    [
-      "Retention Status",
-      "Churn Reason",
-      "Response Notes",
-      "Join Date Retention",
-      "Retention Package"
-    ].forEach(c => newRow[col(header,c)] = "");
-
-    // clear payment & SA related
-    [
-      "Total Session Retention Package",
-      "Last Membership Date",
-      "Actual Last Membership Date",
-      "FP Date",
-      "FP Amount",
-      "FP Invoice Number",
-      "Type Payment",
-      "Total Actual Payment",
-      "SA Retention",
-      "Impacted Holiday",
-      "Other Impact"
-    ].forEach(c => newRow[col(header,c)] = "");
-
-    // clear age now (biar dihitung ulang)
-    newRow[col(header,"Age Now")] = "";
-    newRow[col(header,"Age Group Now")] = "";
-
-    target.appendRow(newRow);
-
-  } finally {
-    lock.releaseLock();
   }
+
+  Logger.log("🏁 PROCESS DONE");
+}
+
+
+// Date validation khusus FP date dan Join date
+
+function setupDateValidation() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ["Ret 1","Ret 2","Ret 3","Ret 4","Ret 5"];
+
+  sheets.forEach(name => {
+
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+
+    const header = sheet.getRange(2,1,1,sheet.getLastColumn()).getValues()[0];
+
+    const dateCols = [
+      "Join Date Retention",
+      "FP Date"
+    ];
+
+    dateCols.forEach(field => {
+
+      try {
+
+        let colIndex = col(header, field) + 1;
+        const lastRow = Math.max(sheet.getLastRow(), 1000);
+
+        let range = sheet.getRange(3, colIndex, lastRow);
+
+        range.clearDataValidations();
+
+        let rule = SpreadsheetApp.newDataValidation()
+          .requireDate()
+          .setAllowInvalid(false)
+          .build();
+
+        range.setDataValidation(rule);
+
+      } catch(err) {}
+    });
+
+  });
+
+  SpreadsheetApp.getUi().alert("✅ Date validation aktif!");
+}
+
+
+/**
+ * 🔥 PUSH 1 ROW (ANTI DUPLICATE + NO OVERWRITE SOURCE)
+ */
+function pushSingleRowSafe(source, target, sourceHeader, targetHeader, row, newKey, cycle) {
+
+  const newRow = new Array(targetHeader.length).fill("");
+
+  // 🔥 COPY SEMUA FIELD YANG MATCH
+  for (let i = 0; i < sourceHeader.length; i++) {
+    let colName = sourceHeader[i];
+
+    try {
+      let targetIndex = col(targetHeader, colName);
+      newRow[targetIndex] = row[i];
+    } catch(err) {}
+  }
+
+  // 🔥 SET UNIQUE KEY
+  try {
+    newRow[col(targetHeader,"Unique Key")] = newKey;
+  } catch(err) {}
+
+  // 🔥 SET CYCLE
+  try {
+    newRow[col(targetHeader,"Cycle")] = cycle;
+  } catch(err) {}
+
+  // 🔥 MAPPING KHUSUS (INI YANG FIX MASALAH LU)
+  const mapping = {
+    "Previous Join Date": "Join Date Retention",
+    "Previous Last Membership Date": "Actual Last Membership Date",
+    "Previous Age": "Age Now",
+    "Previous Age Group": "Age Group Now",
+    "Previous Package": "Retention Package",
+    "Previous Total Session": "Total Session Retention Package",
+    "Previous FP Date": "FP Date",
+    "SA Aquisition": "SA Retention"
+  };
+
+  for (let targetField in mapping) {
+    try {
+      let targetIndex = col(targetHeader, targetField);
+      let sourceIndex = col(sourceHeader, mapping[targetField]);
+
+      newRow[targetIndex] = row[sourceIndex];
+    } catch(err) {}
+  }
+
+  // 🔥 RESET FIELD USER (BIAR INPUT BARU BERSIH)
+  const resetFields = [
+    "SA Retention",
+    "Retention Status",
+    "Churn Reason",
+    "Response Notes",
+    "Join Date Retention",
+    "Retention Package",
+    "Total Session Retention Package",
+    "FP Date",
+    "FP Amount",
+    "FP Invoice Number",
+    "Type Payment",
+    "Total Actual Payment",
+    "Impacted Holiday",
+    "Other Impact",
+    "Last Membership Date",
+    "Actual Last Membership Date",
+    "Age Now",
+    "Age Group Now"
+  ];
+
+  resetFields.forEach(field => {
+    try {
+      newRow[col(targetHeader, field)] = "";
+    } catch(err) {}
+  });
+
+ function getNextRow(sheet) {
+  const data = sheet.getRange("A:A").getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i][0] !== "") return i + 2;
+  }
+  return 3; // start dari row 3 (karena header 2 row)
+}
+}
+
+
+function resetAllRetSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  ss.getSheets().forEach(sheet => {
+    if (sheet.getName().startsWith("Ret ")) {
+
+      if (sheet.getLastRow() > 2) {
+        sheet.getRange(3,1,sheet.getLastRow()-2,sheet.getLastColumn()).clearContent();
+      }
+
+      Logger.log("🧹 CLEAN: " + sheet.getName());
+    }
+  });
 }
 
 
@@ -419,39 +603,21 @@ function resetRetentionExceptRet1() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const MAX_RET = 5;
 
-  const columnsToClear = [
-    "SA Retention",
-    "Retention Status",
-    "Churn Reason",
-    "Response Notes",
-    "Join Date Retention",
-    "Retention Package",
-    "FP Date",
-    "FP Amount",
-    "FP Invoice Number",
-    "Type Payment",
-    "Total Actual Payment",
-    "Impacted Holiday",
-    "Other Impact"
-  ];
+  for (let i = 2; i <= MAX_RET; i++) {
 
-  for (let i = 2; i <= MAX_RET; i++) { // 🔥 mulai dari Ret 2
-
-    let sheet = ss.getSheetByName(`Ret ${i}`);
+    const sheet = ss.getSheetByName(`Ret ${i}`);
     if (!sheet) continue;
 
-    const data = sheet.getDataRange().getValues();
-    const header = data[1];
     const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
 
     if (lastRow < 3) continue;
 
-    for (let colName of columnsToClear) {
-      let colIndex = col(header, colName);
-      sheet.getRange(3, colIndex + 1, lastRow - 2).clearContent();
-    }
+    // 🔥 HAPUS SEMUA DATA (kecuali header)
+    sheet.getRange(3, 1, lastRow - 2, lastCol).clearContent();
 
+    Logger.log(`🔥 Ret ${i} cleared`);
   }
 
-  SpreadsheetApp.getUi().alert("✅ Ret 2 ke atas sudah di-reset!");
+  SpreadsheetApp.getUi().alert("🚀 Ret 2 ke atas sudah bersih! Siap go-live!");
 }
