@@ -163,135 +163,176 @@ function pushSingleRowSafe(source, target, sourceHeader, targetHeader, row, newK
 // CORE System Time-Driven Push to Next Ret
 function processRetentionSafe() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const MAX_RET = 5;
+  const lock = LockService.getScriptLock();
 
-  Logger.log("========== START PROCESS ==========");
+  if (!lock.tryLock(5000)) {
+    Logger.log("⏭️ SKIP (SCRIPT LOCKED)");
+    return;
+  }
 
-  for (let current = 1; current < MAX_RET; current++) {
+  try {
 
-    Logger.log("👉 PROCESS RET " + current + " → RET " + (current+1));
+    SpreadsheetApp.flush();
+    Utilities.sleep(1500);
 
-    let source = ss.getSheetByName(`Ret ${current}`);
-    let target = ss.getSheetByName(`Ret ${current + 1}`);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const MAX_RET = 5;
 
-    if (!source) {
-      Logger.log("❌ SOURCE NOT FOUND: Ret " + current);
-      continue;
+    Logger.log("========== START PROCESS ==========");
+
+    // 🔥 BUFFER TIME (ANTI DATA FRESH)
+    const now = new Date();
+    const lastUpdated = new Date(ss.getLastUpdated());
+
+    if ((now - lastUpdated) < 5000) {
+      Logger.log("⏭️ SKIP (DATA MASIH FRESH)");
+      return;
     }
 
-    if (!target) {
-      Logger.log("🆕 CREATE SHEET: Ret " + (current+1));
-      target = ss.insertSheet(`Ret ${current + 1}`);
-      const headerRange = source.getRange(1,1,2,source.getLastColumn());
-      headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
-      target.setFrozenRows(2);
-    }
+    for (let current = 1; current < MAX_RET; current++) {
 
-    const data = source.getDataRange().getValues();
-    const header = data[1];
+      Logger.log("👉 PROCESS RET " + current + " → RET " + (current+1));
 
-    const targetData = target.getDataRange().getValues();
-    const targetHeader = target.getRange(2,1,1,target.getLastColumn()).getValues()[0];
+      let source = ss.getSheetByName(`Ret ${current}`);
+      let target = ss.getSheetByName(`Ret ${current + 1}`);
 
-    const idx = {
-      id: col(header,"Sparks ID"),
-      status: col(header,"Retention Status"),
-      joinRet: col(header,"Join Date Retention"),
-      lastMember: col(header,"Actual Last Membership Date"),
-      ageNow: col(header,"Age Now"),
-      ageGroupNow: col(header,"Age Group Now"),
-      packageRet: col(header,"Retention Package"),
-      totalSessRet: col(header,"Total Session Retention Package"),
-      fpRet: col(header,"FP Date"),
-      sa: col(header,"SA Retention")
-    };
-
-    // BUILD MAP
-    let targetMap = {};
-    for (let i = 2; i < targetData.length; i++) {
-      let key = targetData[i][col(targetHeader,"Unique Key")];
-      if (key) {
-        targetMap[key.toString().trim()] = i;
-      }
-    }
-
-    Logger.log("📦 EXISTING DATA: " + Object.keys(targetMap).length);
-
-    for (let i = 2; i < data.length; i++) {
-
-      let row = data[i];
-
-      let status = row[idx.status];
-      let clean = status ? status.toString().trim().toLowerCase() : "";
-
-      Logger.log("🔍 ROW " + i + " STATUS: [" + status + "]");
-
-      if (!clean.includes("paid")) {
-        Logger.log("⏭️ SKIP (NOT PAID)");
+      if (!source) {
+        Logger.log("❌ SOURCE NOT FOUND: Ret " + current);
         continue;
       }
 
-      let id = row[idx.id];
-      if (!id) {
-        Logger.log("⚠️ NO ID");
-        continue;
+      if (!target) {
+        Logger.log("🆕 CREATE SHEET: Ret " + (current+1));
+        target = ss.insertSheet(`Ret ${current + 1}`);
+        const headerRange = source.getRange(1,1,2,source.getLastColumn());
+        headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
+        target.setFrozenRows(2);
       }
 
-      id = id.toString().trim();
-      let newKey = id + "-C" + (current + 1);
+      const data = source.getDataRange().getValues();
+      const header = data[1];
 
-      Logger.log("🎯 PROCESS KEY: " + newKey);
+      const targetData = target.getDataRange().getValues();
+      const targetHeader = target.getRange(2,1,1,target.getLastColumn()).getValues()[0];
 
-      // PUSH
-      if (!targetMap[newKey]) {
-
-        Logger.log("🆕 NEW DATA → PUSH");
-
-        pushSingleRowSafe(
-          source,
-          target,
-          header,
-          targetHeader,
-          row,
-          newKey,
-          current + 1
-        );
-
-        continue;
-      }
-
-      // UPDATE
-      Logger.log("🔄 UPDATE EXISTING");
-
-      let rowIndex = targetMap[newKey] + 1;
-
-      const mapping = {
-        "Previous Join Date": row[idx.joinRet],
-        "Previous Last Membership Date": row[idx.lastMember],
-        "Previous Age": row[idx.ageNow],
-        "Previous Age Group": row[idx.ageGroupNow],
-        "Previous Package": row[idx.packageRet],
-        "Previous Total Session": row[idx.totalSessRet],
-        "Previous FP Date": row[idx.fpRet],
-        "SA Aquisition": row[idx.sa]
+      const idx = {
+        id: col(header,"Sparks ID"),
+        status: col(header,"Retention Status"),
+        joinRet: col(header,"Join Date Retention"),
+        lastMember: col(header,"Actual Last Membership Date"),
+        ageNow: col(header,"Age Now"),
+        ageGroupNow: col(header,"Age Group Now"),
+        packageRet: col(header,"Retention Package"),
+        totalSessRet: col(header,"Total Session Retention Package"),
+        fpRet: col(header,"FP Date"),
+        sa: col(header,"SA Retention")
       };
 
-      for (let field in mapping) {
-        try {
-          let colIndex = col(targetHeader, field);
-          target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
+      // BUILD MAP
+      let targetMap = {};
+      for (let i = 2; i < targetData.length; i++) {
+        let key = targetData[i][col(targetHeader,"Unique Key")];
+        if (key) {
+          targetMap[key.toString().trim()] = i;
+        }
+      }
 
-          Logger.log("✔ UPDATE FIELD: " + field);
+      Logger.log("📦 EXISTING DATA: " + Object.keys(targetMap).length);
 
-        } catch(err) {
-          Logger.log("❌ UPDATE FAIL: " + field);
+      for (let i = 2; i < data.length; i++) {
+
+        let row = data[i];
+
+        let status = row[idx.status];
+        let clean = status ? status.toString().trim().toLowerCase() : "";
+
+        Logger.log("🔍 ROW " + i + " STATUS: [" + status + "]");
+
+        if (!clean.includes("paid")) {
+          Logger.log("⏭️ SKIP (NOT PAID)");
+          continue;
+        }
+
+        let id = row[idx.id];
+
+        if (!id) {
+          Logger.log("⚠️ SKIP (NO ID)");
+          continue;
+        }
+
+        // 🔥 VALIDASI DATA WAJIB (ANTI DATA SETENGAH)
+        if (
+          !row[idx.joinRet] ||
+          !row[idx.packageRet] ||
+          !row[idx.totalSessRet]
+        ) {
+          Logger.log("⏭️ SKIP (DATA BELUM LENGKAP)");
+          continue;
+        }
+
+        id = id.toString().trim();
+        let newKey = id + "-C" + (current + 1);
+
+        Logger.log("🎯 PROCESS KEY: " + newKey);
+
+        // PUSH
+        if (!targetMap[newKey]) {
+
+          Logger.log("🆕 NEW DATA → PUSH");
+
+          pushSingleRowSafe(
+            source,
+            target,
+            header,
+            targetHeader,
+            row,
+            newKey,
+            current + 1
+          );
+
+          continue;
+        }
+
+        // UPDATE
+        Logger.log("🔄 UPDATE EXISTING");
+
+        let rowIndex = targetMap[newKey] + 1;
+
+        const mapping = {
+          "Previous Join Date": row[idx.joinRet],
+          "Previous Last Membership Date": row[idx.lastMember],
+          "Previous Age": row[idx.ageNow],
+          "Previous Age Group": row[idx.ageGroupNow],
+          "Previous Package": row[idx.packageRet],
+          "Previous Total Session": row[idx.totalSessRet],
+          "Previous FP Date": row[idx.fpRet],
+          "SA Aquisition": row[idx.sa]
+        };
+
+        for (let field in mapping) {
+          try {
+            let colIndex = col(targetHeader, field);
+            target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
+
+            Logger.log("✔ UPDATE FIELD: " + field);
+
+          } catch(err) {
+            Logger.log("❌ UPDATE FAIL: " + field);
+          }
         }
       }
     }
-  }
 
-  Logger.log("========== END PROCESS ==========");
+    Logger.log("========== END PROCESS ==========");
+
+  } catch (err) {
+
+    Logger.log("💥 FATAL ERROR: " + err);
+
+  } finally {
+
+    lock.releaseLock();
+  }
 }
 
 
