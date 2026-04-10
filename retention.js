@@ -180,14 +180,14 @@ function processRetentionSafe() {
 
     Logger.log("========== START PROCESS ==========");
 
-    // 🔥 BUFFER TIME (ANTI DATA FRESH)
-    const now = new Date();
-    const lastUpdated = new Date(ss.getLastUpdated());
+    // // 🔥 BUFFER TIME (ANTI DATA FRESH)
+    // const now = new Date();
+    // const lastUpdated = new Date(ss.getLastUpdated());
 
-    if ((now - lastUpdated) < 5000) {
-      Logger.log("⏭️ SKIP (DATA MASIH FRESH)");
-      return;
-    }
+    // if ((now - lastUpdated) < 5000) {
+    //   Logger.log("⏭️ SKIP (DATA MASIH FRESH)");
+    //   return;
+    // }
 
     for (let current = 1; current < MAX_RET; current++) {
 
