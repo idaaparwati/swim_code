@@ -170,6 +170,16 @@ function processRetentionSafe() {
     return;
   }
 
+  const props = PropertiesService.getScriptProperties();
+
+  // 🔥 ANTI DOUBLE RUN (TRIGGER + BUTTON)
+  if (props.getProperty("PROCESS_RUNNING") === "true") {
+    Logger.log("⏭️ SKIP (PROCESS SEDANG BERJALAN)");
+    return;
+  }
+
+  props.setProperty("PROCESS_RUNNING", "true");
+
   try {
 
     SpreadsheetApp.flush();
@@ -180,14 +190,8 @@ function processRetentionSafe() {
 
     Logger.log("========== START PROCESS ==========");
 
-    // // 🔥 BUFFER TIME (ANTI DATA FRESH)
-    // const now = new Date();
-    // const lastUpdated = new Date(ss.getLastUpdated());
-
-    // if ((now - lastUpdated) < 5000) {
-    //   Logger.log("⏭️ SKIP (DATA MASIH FRESH)");
-    //   return;
-    // }
+    // 🔥 ERROR TRACKER
+    let errorLogs = {};
 
     for (let current = 1; current < MAX_RET; current++) {
 
@@ -228,16 +232,11 @@ function processRetentionSafe() {
         sa: col(header,"SA Retention")
       };
 
-      // BUILD MAP
       let targetMap = {};
       for (let i = 2; i < targetData.length; i++) {
         let key = targetData[i][col(targetHeader,"Unique Key")];
-        if (key) {
-          targetMap[key.toString().trim()] = i;
-        }
+        if (key) targetMap[key.toString().trim()] = i;
       }
-
-      Logger.log("📦 EXISTING DATA: " + Object.keys(targetMap).length);
 
       for (let i = 2; i < data.length; i++) {
 
@@ -246,84 +245,73 @@ function processRetentionSafe() {
         let status = row[idx.status];
         let clean = status ? status.toString().trim().toLowerCase() : "";
 
-        Logger.log("🔍 ROW " + i + " STATUS: [" + status + "]");
-
-        if (!clean.includes("paid")) {
-          Logger.log("⏭️ SKIP (NOT PAID)");
-          continue;
-        }
+        if (!clean.includes("paid")) continue;
 
         let id = row[idx.id];
+        if (!id) continue;
 
-        if (!id) {
-          Logger.log("⚠️ SKIP (NO ID)");
-          continue;
-        }
-
-        // 🔥 VALIDASI DATA WAJIB (ANTI DATA SETENGAH)
-        if (
-          !row[idx.joinRet] ||
-          !row[idx.packageRet] ||
-          !row[idx.totalSessRet]
-        ) {
-          Logger.log("⏭️ SKIP (DATA BELUM LENGKAP)");
-          continue;
-        }
+        if (!row[idx.joinRet] || !row[idx.packageRet] || !row[idx.totalSessRet]) continue;
 
         id = id.toString().trim();
         let newKey = id + "-C" + (current + 1);
 
-        Logger.log("🎯 PROCESS KEY: " + newKey);
+        try {
 
-        // PUSH
-        if (!targetMap[newKey]) {
+          if (!targetMap[newKey]) {
 
-          Logger.log("🆕 NEW DATA → PUSH");
+            pushSingleRowSafe(
+              source,
+              target,
+              header,
+              targetHeader,
+              row,
+              newKey,
+              current + 1
+            );
 
-          pushSingleRowSafe(
-            source,
-            target,
-            header,
-            targetHeader,
-            row,
-            newKey,
-            current + 1
-          );
-
-          continue;
-        }
-
-        // UPDATE
-        Logger.log("🔄 UPDATE EXISTING");
-
-        let rowIndex = targetMap[newKey] + 1;
-
-        const mapping = {
-          "Previous Join Date": row[idx.joinRet],
-          "Previous Last Membership Date": row[idx.lastMember],
-          "Previous Age": row[idx.ageNow],
-          "Previous Age Group": row[idx.ageGroupNow],
-          "Previous Package": row[idx.packageRet],
-          "Previous Total Session": row[idx.totalSessRet],
-          "Previous FP Date": row[idx.fpRet],
-          "SA Aquisition": row[idx.sa]
-        };
-
-        for (let field in mapping) {
-          try {
-            let colIndex = col(targetHeader, field);
-            target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
-
-            Logger.log("✔ UPDATE FIELD: " + field);
-
-          } catch(err) {
-            Logger.log("❌ UPDATE FAIL: " + field);
+            continue;
           }
+
+          let rowIndex = targetMap[newKey] + 1;
+
+          const mapping = {
+            "Previous Join Date": row[idx.joinRet],
+            "Previous Last Membership Date": row[idx.lastMember],
+            "Previous Age": row[idx.ageNow],
+            "Previous Age Group": row[idx.ageGroupNow],
+            "Previous Package": row[idx.packageRet],
+            "Previous Total Session": row[idx.totalSessRet],
+            "Previous FP Date": row[idx.fpRet],
+            "SA Aquisition": row[idx.sa]
+          };
+
+          for (let field in mapping) {
+            try {
+              let colIndex = col(targetHeader, field);
+              target.getRange(rowIndex, colIndex + 1).setValue(mapping[field]);
+            } catch(err) {
+
+              if (!errorLogs[id]) errorLogs[id] = [];
+              errorLogs[id].push(`Ret ${current} Row ${i}: gagal update ${field}`);
+            }
+          }
+
+        } catch (err) {
+
+          if (!errorLogs[id]) errorLogs[id] = [];
+          errorLogs[id].push(`Ret ${current} Row ${i}: ${err}`);
         }
       }
     }
 
     Logger.log("========== END PROCESS ==========");
+
+    // 🔥 HANDLE ERROR
+    if (Object.keys(errorLogs).length > 0) {
+      logErrorToSheet(errorLogs);
+      sendErrorEmail(errorLogs);
+      sendWhatsAppAlert(errorLogs); // 🔥 WA juga
+    }
 
   } catch (err) {
 
@@ -331,10 +319,48 @@ function processRetentionSafe() {
 
   } finally {
 
+    props.deleteProperty("PROCESS_RUNNING"); // 🔥 RESET FLAG
     lock.releaseLock();
   }
 }
 
+function sendErrorEmail(errorLogs) {
+
+  const emails = ["ida.parwati@seven-retail.com"];
+
+  let message = "🚨 ERROR RETENTION SYSTEM\n\n";
+
+  for (let id in errorLogs) {
+    message += `🧑 ${id}\n`;
+    errorLogs[id].forEach(e => message += "- " + e + "\n");
+    message += "\n";
+  }
+
+  MailApp.sendEmail({
+    to: emails.join(","),
+    subject: "🚨 Retention Error",
+    body: message
+  });
+}
+
+function runRetentionManual() {
+
+  const ui = SpreadsheetApp.getUi();
+
+  try {
+
+    ui.alert("🚀 Processing retention...");
+
+    processRetentionSafe();
+
+    ui.alert("✅ SUCCESS!\nData berhasil diproses");
+
+  } catch (err) {
+
+    ui.alert("❌ ERROR\n" + err);
+
+  }
+}
 
 // Date validation khusus FP date dan Join date
 
@@ -604,6 +630,159 @@ function resetAllSAColumns() {
   });
 
   SpreadsheetApp.getUi().alert("🔥 Semua SA column sudah di-reset!");
+}
+
+
+
+function stackRetentionFinal_daily() {
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let target = ss.getSheetByName("Master Stack");
+
+  const sheets = ["Ret 1", "Ret 2", "Ret 3", "Ret 4"];
+  const START_ROW = 3;
+
+  const ID_COL = 3; // ✅ FIX → Sparks ID
+  const STATUS_COL = 21;
+
+  if (!target) {
+    target = ss.insertSheet("Master Stack");
+
+    const sample = ss.getSheetByName("Ret 1");
+    const headerRange = sample.getRange(1,1,2,sample.getLastColumn());
+
+    headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
+
+    const lastCol = sample.getLastColumn();
+
+    const extraHeader = ["Center","From Ret","To Ret"];
+
+    target
+      .getRange(2, lastCol + 1, 1, extraHeader.length)
+      .setValues([extraHeader]);
+
+    target.setFrozenRows(2);
+  }
+
+  const lastRow = target.getLastRow();
+  const lastCol = target.getLastColumn();
+
+  let existingData = [];
+  let idMap = {}; // 🔥 KEY: SparksID + cycle
+
+  if (lastRow >= START_ROW) {
+    existingData = target
+      .getRange(START_ROW, 1, lastRow - 2, lastCol)
+      .getValues();
+
+    existingData.forEach((row, i) => {
+      const id = row[ID_COL - 1];
+      const toRet = row[lastCol - 1];
+
+      if (id) {
+        idMap[`${id}-${toRet}`] = {
+          rowIndex: i + START_ROW,
+          rowData: row
+        };
+      }
+    });
+  }
+
+  let appendData = [];
+
+  sheets.forEach((sheetName, idx) => {
+
+    const sh = ss.getSheetByName(sheetName);
+    if (!sh) return;
+
+    const lastRowSheet = sh.getLastRow();
+    if (lastRowSheet < START_ROW) return;
+
+    const data = sh
+      .getRange(START_ROW, 1, lastRowSheet - 2, sh.getLastColumn())
+      .getValues();
+
+    data.forEach(row => {
+
+      const id = row[ID_COL - 1];
+      if (!id) return;
+
+      const status = row[STATUS_COL - 1];
+      const isRet1 = sheetName === "Ret 1";
+
+      if (!isRet1 && String(status).toLowerCase() !== "paid") return;
+
+      const center = String(id).substring(0,3);
+
+      // 🔥 DEFINE FROM → TO
+      const toRet = sheetName;
+      const fromRet = idx === 0 ? "Ret 1" : `Ret ${idx}`;
+
+      const mapKey = `${id}-${toRet}`;
+
+      // ======================
+      // UPDATE (kalau sudah ada)
+      // ======================
+      if (idMap[mapKey]) {
+
+        const existing = idMap[mapKey];
+        const existingCore = existing.rowData.slice(0, row.length);
+
+        let isChanged = false;
+
+        for (let i = 0; i < row.length; i++) {
+          if (existingCore[i] !== row[i]) {
+            isChanged = true;
+            break;
+          }
+        }
+
+        if (isChanged) {
+
+          const newRow = [
+            ...row,
+            center,
+            fromRet,
+            toRet
+          ];
+
+          Logger.log(`🔄 UPDATE ${id} | ${toRet}`);
+
+          target
+            .getRange(existing.rowIndex, 1, 1, newRow.length)
+            .setValues([newRow]);
+        }
+
+      } 
+      // ======================
+      // APPEND (cycle baru)
+      // ======================
+      else {
+
+        const newRow = [
+          ...row,
+          center,
+          fromRet,
+          toRet
+        ];
+
+        Logger.log(`🆕 APPEND ${id} | ${fromRet} → ${toRet}`);
+
+        appendData.push(newRow);
+      }
+
+    });
+  });
+
+  if (appendData.length > 0) {
+    const start = target.getLastRow() + 1;
+
+    target
+      .getRange(start, 1, appendData.length, appendData[0].length)
+      .setValues(appendData);
+  }
+
+  Logger.log("✅ MASTER STACK DONE");
 }
 
 function resetRetentionExceptRet1() {
