@@ -27,6 +27,8 @@ function getNextRow(sheet) {
 
 
 
+
+
 // ON edit warning only (tidak push ke Ret Selanjutnya)
 
 function onEdit(e) {
@@ -427,180 +429,7 @@ function resetAllRetSheets() {
 }
 
 
-/**
- * 🔥 OPTIONAL BACKUP SYNC (TIDAK RESET SA)
- */
-function runAllRetention() {
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const MAX_RET = 5;
-
-  for (let current = 1; current < MAX_RET; current++) {
-
-    let source = ss.getSheetByName(`Ret ${current}`);
-    let target = ss.getSheetByName(`Ret ${current + 1}`);
-
-    if (!source || !target) continue;
-
-    const data = source.getDataRange().getValues();
-    const header = data[1];
-
-    const idx = {
-      id: col(header,"Sparks ID"),
-      unique: col(header,"Unique Key"),
-      joinRet: col(header,"Join Date Retention")
-    };
-
-    const targetData = target.getDataRange().getValues();
-
-    let targetMap = {};
-
-    for (let i = 2; i < targetData.length; i++) {
-      let key = targetData[i][idx.unique];
-      if (key) targetMap[key.toString().trim()] = i;
-    }
-
-    data.slice(2).forEach(row => {
-
-      let id = row[idx.id];
-      if (!id) return;
-
-      id = id.toString().trim();
-      let key = id + "-C" + (current + 1);
-
-      if (targetMap[key] !== undefined) {
-
-        // 🔥 update field NON-SA saja
-        // target.getRange(targetMap[key] + 1, idx.joinRet + 1)
-        //       .setValue(row[idx.joinRet]);
-      }
-
-    });
-
-  }
-
-  Logger.log("✅ Backup sync jalan");
-}
-
-function rebuildRetention() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const MAX_RET = 5;
-
-  // 🔥 LOOP RET
-  for (let current = 1; current < MAX_RET; current++) {
-
-    let sourceName = `Ret ${current}`;
-    let targetName = `Ret ${current + 1}`;
-
-    let source = ss.getSheetByName(sourceName);
-    let target = ss.getSheetByName(targetName);
-
-    if (!source) continue;
-
-    const data = source.getDataRange().getValues();
-    const header = data[1];
-
-    // 🔥 CLEAR TARGET DULU (BIAR BERSIH)
-    if (target) {
-      if (target.getLastRow() > 2) {
-        target.getRange(3,1,target.getLastRow()-2,target.getLastColumn()).clearContent();
-      }
-    }
-
-    // 🔥 REBUILD SEMUA ROW
-    for (let i = 2; i < data.length; i++) {
-
-      let row = data[i];
-
-      let status = row[col(header,"Retention Status")];
-      if (!status) continue;
-
-      if (status.toString().toLowerCase() !== "paid") continue;
-
-      pushSingleRow(sourceName, targetName, current + 1, i + 1);
-    }
-
-  }
-
-  SpreadsheetApp.getUi().alert("✅ Rebuild Retention selesai!");
-}
-
-function syncAllRetentionFixed() {
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const MAX_RET = 5;
-
-  // 🎯 MAPPING FIELD (INI KUNCI)
-  const fieldMapping = {
-    "Join Date Retention": "Previous Join Date",
-    "Actual Last Membership Date": "Previous Last Membership Date",
-    "Age Now": "Previous Age",
-    "Age Group Now": "Previous Age Group",
-    "Retention Package": "Previous Package",
-    "Total Session Retention Package": "Previous Total Session",
-    "FP Date": "Previous FP Date",
-    "SA Retention": "SA Aquisition"
-  };
-
-  for (let current = 1; current < MAX_RET; current++) {
-
-    let source = ss.getSheetByName(`Ret ${current}`);
-    let target = ss.getSheetByName(`Ret ${current + 1}`);
-
-    if (!source || !target) continue;
-
-    const data = source.getDataRange().getValues();
-    const header = data[1];
-    const targetData = target.getDataRange().getValues();
-
-    const idx = {
-      unique: col(header,"Unique Key")
-    };
-
-    let targetMap = {};
-
-    for (let i = 2; i < targetData.length; i++) {
-      let key = targetData[i][idx.unique];
-      if (key) targetMap[key.toString().trim()] = i;
-    }
-
-    for (let i = 2; i < data.length; i++) {
-
-      let row = data[i];
-      let currentKey = row[idx.unique];
-      if (!currentKey) continue;
-
-      let baseId = currentKey.toString().split("-C")[0];
-      let nextKey = baseId + "-C" + (current + 1);
-
-      if (targetMap[nextKey] !== undefined) {
-
-        for (let sourceField in fieldMapping) {
-
-          const targetField = fieldMapping[sourceField];
-
-          const sourceCol = col(header, sourceField);
-          const targetCol = col(header, targetField);
-
-          const sourceValue = row[sourceCol];
-          const targetValue = targetData[targetMap[nextKey]][targetCol];
-
-          if (sourceValue != targetValue) {
-            target.getRange(targetMap[nextKey] + 1, targetCol + 1)
-                  .setValue(sourceValue);
-          }
-
-        }
-
-      }
-
-    }
-
-  }
-
-  SpreadsheetApp.getUi().alert("✅ Sync mapping selesai!");
-}
 
 function resetAllSAColumns() {
 
@@ -642,9 +471,14 @@ function stackRetentionFinal_daily() {
   const sheets = ["Ret 1", "Ret 2", "Ret 3", "Ret 4"];
   const START_ROW = 3;
 
-  const ID_COL = 3; // ✅ FIX → Sparks ID
+  const ID_COL = 3; // Sparks ID
   const STATUS_COL = 21;
 
+  Logger.log("🚀 START MASTER STACK PROCESS");
+
+  // =============================
+  // AUTO CREATE MASTER
+  // =============================
   if (!target) {
     target = ss.insertSheet("Master Stack");
 
@@ -653,23 +487,48 @@ function stackRetentionFinal_daily() {
 
     headerRange.copyTo(target.getRange(1,1), {contentsOnly:false});
 
-    const lastCol = sample.getLastColumn();
+    // 🔥 REMOVE UNUSED COLUMN DARI HEADER
+    const header = target.getRange(2,1,1,target.getLastColumn()).getValues()[0];
 
-    const extraHeader = ["Center","From Ret","To Ret"];
+    const removeFields = ["Sisa Sesi","Last Class Date"];
+    let indexesToRemove = [];
+
+    removeFields.forEach(field => {
+      try {
+        const idx = col(header, field);
+        indexesToRemove.push(idx + 1);
+      } catch(e){}
+    });
+
+    indexesToRemove.sort((a,b)=>b-a);
+    indexesToRemove.forEach(colIdx => target.deleteColumn(colIdx));
+
+    const lastCol = target.getLastColumn();
+
+    const extraHeader = [
+      "Center",
+      "From Ret",
+      "To Ret"
+    ];
 
     target
       .getRange(2, lastCol + 1, 1, extraHeader.length)
       .setValues([extraHeader]);
 
     target.setFrozenRows(2);
+
+    Logger.log("🆕 Master Stack created");
   }
 
   const lastRow = target.getLastRow();
   const lastCol = target.getLastColumn();
 
   let existingData = [];
-  let idMap = {}; // 🔥 KEY: SparksID + cycle
+  let idMap = {};
 
+  // =============================
+  // LOAD EXISTING DATA
+  // =============================
   if (lastRow >= START_ROW) {
     existingData = target
       .getRange(START_ROW, 1, lastRow - 2, lastCol)
@@ -690,6 +549,9 @@ function stackRetentionFinal_daily() {
 
   let appendData = [];
 
+  // =============================
+  // LOOP ALL RET
+  // =============================
   sheets.forEach((sheetName, idx) => {
 
     const sh = ss.getSheetByName(sheetName);
@@ -698,40 +560,74 @@ function stackRetentionFinal_daily() {
     const lastRowSheet = sh.getLastRow();
     if (lastRowSheet < START_ROW) return;
 
+    const header = sh.getRange(2,1,1,sh.getLastColumn()).getValues()[0];
+
     const data = sh
       .getRange(START_ROW, 1, lastRowSheet - 2, sh.getLastColumn())
       .getValues();
 
-    data.forEach(row => {
+    data.forEach((row, i) => {
 
       const id = row[ID_COL - 1];
       if (!id) return;
 
       const status = row[STATUS_COL - 1];
-      const isRet1 = sheetName === "Ret 1";
-
-      if (!isRet1 && String(status).toLowerCase() !== "paid") return;
+      const clean = status ? status.toString().toLowerCase().trim() : "";
 
       const center = String(id).substring(0,3);
 
-      // 🔥 DEFINE FROM → TO
       const toRet = sheetName;
       const fromRet = idx === 0 ? "Ret 1" : `Ret ${idx}`;
 
       const mapKey = `${id}-${toRet}`;
 
-      // ======================
-      // UPDATE (kalau sudah ada)
-      // ======================
+      // =============================
+      // 🔥 REMOVE UNUSED COLUMN
+      // =============================
+      let finalRow = removeUnusedColumns(row, header);
+
+      // =============================
+      // 🔥 RESET SA FIELD IF NOT PAID
+      // =============================
+      if (sheetName !== "Ret 1" && clean !== "paid") {
+
+        const resetFields = [
+          "SA Retention",
+          "Retention Status",
+          "Churn Reason",
+          "Response Notes",
+          "Join Date Retention",
+          "Retention Package",
+          "Total Session Retention Package",
+          "FP Date",
+          "FP Amount",
+          "FP Invoice Number",
+          "Type Payment",
+          "Total Actual Payment"
+        ];
+
+        resetFields.forEach(field => {
+          try {
+            const colIndex = col(header, field);
+            finalRow[colIndex] = "";
+          } catch(err) {}
+        });
+
+        Logger.log(`🧹 RESET SA FIELD → ${id} (${sheetName})`);
+      }
+
+      // =============================
+      // UPDATE EXISTING
+      // =============================
       if (idMap[mapKey]) {
 
         const existing = idMap[mapKey];
-        const existingCore = existing.rowData.slice(0, row.length);
+        const existingCore = existing.rowData.slice(0, finalRow.length);
 
         let isChanged = false;
 
-        for (let i = 0; i < row.length; i++) {
-          if (existingCore[i] !== row[i]) {
+        for (let j = 0; j < finalRow.length; j++) {
+          if (existingCore[j] !== finalRow[j]) {
             isChanged = true;
             break;
           }
@@ -740,7 +636,7 @@ function stackRetentionFinal_daily() {
         if (isChanged) {
 
           const newRow = [
-            ...row,
+            ...finalRow,
             center,
             fromRet,
             toRet
@@ -754,13 +650,13 @@ function stackRetentionFinal_daily() {
         }
 
       } 
-      // ======================
-      // APPEND (cycle baru)
-      // ======================
+      // =============================
+      // APPEND NEW
+      // =============================
       else {
 
         const newRow = [
-          ...row,
+          ...finalRow,
           center,
           fromRet,
           toRet
@@ -774,7 +670,11 @@ function stackRetentionFinal_daily() {
     });
   });
 
+  // =============================
+  // BATCH INSERT
+  // =============================
   if (appendData.length > 0) {
+
     const start = target.getLastRow() + 1;
 
     target
@@ -807,4 +707,35 @@ function resetRetentionExceptRet1() {
   }
 
   SpreadsheetApp.getUi().alert("🚀 Ret 2 ke atas sudah bersih! Siap go-live!");
+}
+
+function removeUnusedColumns(row, header) {
+
+  const removeFields = [
+    "Sisa Sesi",
+    "Last Class Date"
+  ];
+
+  let indexesToRemove = [];
+
+  removeFields.forEach(field => {
+    try {
+      const idx = col(header, field);
+      indexesToRemove.push(idx);
+    } catch (e) {}
+  });
+
+  indexesToRemove.sort((a,b) => b - a);
+
+  let newRow = [...row];
+
+  indexesToRemove.forEach(idx => {
+    newRow.splice(idx, 1);
+  });
+
+  return newRow;
+}
+
+function resetProcessFlag() {
+  PropertiesService.getScriptProperties().deleteProperty("PROCESS_RUNNING");
 }
