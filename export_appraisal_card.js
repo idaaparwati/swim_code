@@ -9,17 +9,22 @@ function exportAppraisalPDF() {
     return;
   }
 
-  const studentName = sheet.getRange("D15").getDisplayValue().trim();
-  const ageGroup = sheet.getRange("D16").getDisplayValue();
-  const level = sheet.getRange("D17").getDisplayValue();
+  const studentName = sheet.getRange("D16").getDisplayValue().trim();
+  const ageGroup = sheet.getRange("D17").getDisplayValue();
+  const level = sheet.getRange("D18").getDisplayValue();
 
   if (!studentName) {
     SpreadsheetApp.getUi().alert("Please select student first.");
     return;
   }
 
+  // ===== GET CENTER FROM FILE NAME =====
+  const fileNameSheet = ss.getName();
+  const parts = fileNameSheet.split(" - ");
+  const center = parts.length > 1 ? parts.pop().trim() : "UNKNOWN";
+
+  // ===== FILE NAME (UPDATED) =====
   const fileName =
-    "Appraisal - " +
     studentName +
     " - " +
     ageGroup +
@@ -36,18 +41,18 @@ function exportAppraisalPDF() {
     "/export?" +
     "format=pdf" +
     "&gid=" + sheetId +
-    "&range=B6:F55" +
-    "&size=A4" +
+    "&range=B6:F65" +
+    "&size=F4" +
     "&portrait=true" +
     "&fitw=true" +
     "&gridlines=false" +
     "&printtitle=false" +
     "&sheetnames=false" +
     "&pagenumbers=false" +
-    "&top_margin=0" +
-    "&bottom_margin=0" +
-    "&left_margin=0" +
-    "&right_margin=0";
+    "&top_margin=0.3" +
+    "&bottom_margin=0.5" +
+    "&left_margin=0.2" +
+    "&right_margin=0.2";
 
   const token = ScriptApp.getOAuthToken();
 
@@ -60,7 +65,6 @@ function exportAppraisalPDF() {
   const blob = response.getBlob().setName(fileName);
 
   // ===== MASTER FOLDER =====
-
   const masterFolderName = "Master Appraisal";
   let masterFolder;
 
@@ -72,31 +76,47 @@ function exportAppraisalPDF() {
     masterFolder = DriveApp.createFolder(masterFolderName);
   }
 
-  // ===== SUB FOLDER (AgeGroup + Level) =====
+  // ===== CENTER FOLDER =====
+  let centerFolder;
+  const centerFolders = masterFolder.getFoldersByName(center);
 
-  const subFolderName = ageGroup + " " + level;
-
-  let subFolder;
-
-  const subFolders = masterFolder.getFoldersByName(subFolderName);
-
-  if (subFolders.hasNext()) {
-    subFolder = subFolders.next();
+  if (centerFolders.hasNext()) {
+    centerFolder = centerFolders.next();
   } else {
-    subFolder = masterFolder.createFolder(subFolderName);
+    centerFolder = masterFolder.createFolder(center);
   }
 
-  // ===== Replace file jika sudah ada =====
+  // ===== AGE GROUP FOLDER =====
+  let ageFolder;
+  const ageFolders = centerFolder.getFoldersByName(ageGroup);
 
-  const existingFiles = subFolder.getFilesByName(fileName);
+  if (ageFolders.hasNext()) {
+    ageFolder = ageFolders.next();
+  } else {
+    ageFolder = centerFolder.createFolder(ageGroup);
+  }
+
+  // ===== LEVEL FOLDER =====
+  let levelFolder;
+  const levelFolders = ageFolder.getFoldersByName(level);
+
+  if (levelFolders.hasNext()) {
+    levelFolder = levelFolders.next();
+  } else {
+    levelFolder = ageFolder.createFolder(level);
+  }
+
+  // ===== REPLACE FILE =====
+  const existingFiles = levelFolder.getFilesByName(fileName);
 
   while (existingFiles.hasNext()) {
     existingFiles.next().setTrashed(true);
   }
 
-  const file = subFolder.createFile(blob);
+  // ===== SAVE FILE =====
+  levelFolder.createFile(blob);
 
-  const folderUrl = subFolder.getUrl();
+  const folderUrl = levelFolder.getUrl();
 
   showDriveLink(studentName, folderUrl);
 }
